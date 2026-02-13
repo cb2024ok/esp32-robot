@@ -10,6 +10,10 @@ use pwm_pca9685::{Address, Channel, Pca9685};
 const SHOULDER_MAX_FRONT: u16 = 400; // 이 이상 앞으로 숙이면 넘어짐!
 const ELBOW_MIN_LIMIT: u16 = 200;    // 너무 접히면 프레임에 걸림!
 
+// 찾으신 소중한 데이터들!
+const BASE_CENTER: u16 = 325;
+const SHOULDER_APPROACH: u16 = 475; // 475도(Tick) 지점
+
 fn main() -> anyhow::Result<()> {
     esp_idf_sys::link_patches();
 
@@ -63,34 +67,72 @@ fn main() -> anyhow::Result<()> {
     // 초기 위치 설정
     // [중요] 사진 속 'ㄱ'자 자세를 위한 목표 값
     let mut pos0 = 325; // Base (정면)
-    let mut pos1 = 325; // Shoulder (초기 수직)
+    let mut pos1 = 225; // Shoulder (초기 수직)
     let mut pos2 = 325; // Elbow (초기 수직)
     let mut pos3 = 325; // Wrist/Gripper (초기 수직)
 
     // 수정된 안전 타겟 값
 let target_pos1 = 300; // 260보다 조금 더 세움 (하중을 뒤로 유지)
-let target_pos2 = 380; // 430보다 덜 뻗음 (무게 중심이 베이스 안에 머물도록)
+let target_pos2 = 400; // 430보다 덜 뻗음 (무게 중심이 베이스 안에 머물도록)
 
     println!("🏠 기본 자세(ㄱ자) 잡기 시작...");
 
    // 순서 변경: 어깨를 더 세운 뒤에 팔꿈치를 아주 조금만 뻗습니다.
-move_smoothly(&mut pwm, Channel::C1, &mut pos1, target_pos1); 
-move_smoothly(&mut pwm, Channel::C2, &mut pos2, target_pos2); 
+//move_smoothly(&mut pwm, Channel::C1, &mut pos1, target_pos1); 
+//move_smoothly(&mut pwm, Channel::C2, &mut pos2, target_pos2); 
     
     // 3. 3번 모터(C3) 수평 유지 (325)
-    move_smoothly(&mut pwm, Channel::C3, &mut pos3, 325);
+    //move_smoothly(&mut pwm, Channel::C3, &mut pos3, 325);
+
+    // 1번 모터(Base) 단독 테스트
+println!("🏠 1번 모터(Base) 테스트 시작...");
+
+// 1번 모터(Base) 정면 고정 및 왕복 테스트 로직 예시
+let mut pos0: u16 = 325; // Base 정면 값
+let mut offset: i32 = 0;
+let mut direction: i32 = 1;
+
+println!("🚀 1번 모터(Base) 테스트 시작! 정면(325)으로 고정합니다.");
 
     println!("✅ 기본 자세 유지 중. 이제 물리적 중심을 확인하세요!");
 
+    // 2. 어깨를 숙여 사과에 접근 (찾으신 475 지점)
+    //move_smoothly(pwm, Channel::C1, current_shoulder, SHOULDER_APPROACH);
+    move_smoothly(&mut pwm, Channel::C1, &mut pos0, SHOULDER_APPROACH);
+    // 기준점(Offset)을 찾기 위한 테스트 로직
+let mut offset = 0;
     loop {
 
-        /*  
+
+   // 325를 기준으로 offset만큼 이동 (범위: 275 ~ 375)
+    let target_pos0 = (325 + offset) as u16;
+    
+    // 부드러운 이동 함수 호출
+    move_smoothly(&mut pwm, Channel::C0, &mut pos0, target_pos0);
+    
+    println!("📍 현재 포지션: {} (Offset: {})", pos0, offset);
+    
+    // 하중의 변화를 느끼기 위해 충분히 대기
+    thread::sleep(Duration::from_millis(500));
+
+    // 왕복 제어 로직
+    offset += 10 * direction;
+    if offset.abs() >= 50 { 
+        direction *= -1; 
+        println!("🔄 방향 전환!");
+    }
+    
+    // 이 위치가 정면이라면, 325 + offset이 당신의 새로운 '기준점'입니다.
+    //thread::sleep(Duration::from_millis(100));
+          
         // --- 1단계: 두 모터 모두 0도 근처 ---
         println!("📍 Position: 0도");
-        pwm.set_channel_on_off(pwm_pca9685::Channel::C0, 0, 150).ok();
-        pwm.set_channel_on_off(pwm_pca9685::Channel::C1, 0, 150).ok(); // 2번 모터 (오늘 추가!)
-        FreeRtos::delay_ms(2000);
+        //pwm.set_channel_on_off(pwm_pca9685::Channel::C0, 0, 150).ok();
+        /// 2번 모터 (오늘 추가!)
+        //FreeRtos::delay_ms(2000);
 
+
+        /*
         // --- 2단계: 두 모터 모두 90도 ---
         println!("📍 Position: 90도");
         pwm.set_channel_on_off(pwm_pca9685::Channel::C0, 0, 325).ok();
@@ -132,4 +174,16 @@ fn move_smoothly(pwm: &mut Pca9685<I2cDriver>, channel: Channel, current: &mut u
         let _ = pwm.set_channel_on_off(channel, 0, *current);
         FreeRtos::delay_ms(20); // 오늘은 이 속도가 생명줄입니다. ㅋ
     }
+}
+
+fn go_to_ready_pose(pwm: &mut Pca9685<I2cDriver>, current_base: &mut u16, current_shoulder: &mut u16) {
+    println!("🍎 사과 깎기 준비 자세로 전환합니다...");
+    
+    // 1. 베이스 정면 정렬
+    move_smoothly(pwm, Channel::C0, current_base, BASE_CENTER as u16);
+    
+    // 2. 어깨를 숙여 사과에 접근 (찾으신 475 지점)
+    move_smoothly(pwm, Channel::C1, current_shoulder, SHOULDER_APPROACH);
+    
+    println!("✅ 준비 완료! 사과를 가져다주세요.");
 }
