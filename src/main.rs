@@ -1,189 +1,131 @@
-use std::{thread, time::Duration};
-
-use esp_idf_hal::{delay::FreeRtos, ledc::LEDC};
-use esp_idf_hal::i2c::*;
+use esp_idf_hal::delay::{Ets, FreeRtos};
+use esp_idf_hal::gpio::*;
+use esp_idf_hal::i2c::{I2cConfig, I2cDriver};
 use esp_idf_hal::peripherals::Peripherals;
-use esp_idf_hal::prelude::*;
-use pwm_pca9685::{Address, Channel, Pca9685};
+use anyhow::Result;
+use esp_idf_hal::units::Hertz;
+use pwm_pca9685::{Address, Pca9685};
 
-// 전역 상수나 변수로 선언해서 관리하세요
-const SHOULDER_MAX_FRONT: u16 = 400; // 이 이상 앞으로 숙이면 넘어짐!
-const ELBOW_MIN_LIMIT: u16 = 200;    // 너무 접히면 프레임에 걸림!
+fn main() -> Result<()> {
+    esp_idf_svc::sys::link_patches();
+    let peripherals = Peripherals::take()?;
 
-// 찾으신 소중한 데이터들!
-const BASE_CENTER: u16 = 325;
-const SHOULDER_APPROACH: u16 = 475; // 475도(Tick) 지점
+    println!("🚀 [테스트] I2C를 제외하고 PS2 컨트롤러만 시작합니다...");
 
-fn main() -> anyhow::Result<()> {
-    esp_idf_sys::link_patches();
+    // --- I2C 및 PCA9685 로직 일시 중단 ---
+    let config = I2cConfig::new().baudrate(Hertz(100_000));
+    let mut i2c = I2cDriver::new(
+        peripherals.i2c0,
+        peripherals.pins.gpio21,
+        peripherals.pins.gpio22,
+        &config,
+    )?;
 
-    // 1. 하드웨어 주변장치 가져오기
-    let peripherals = Peripherals::take().unwrap();
+    let mut pwm = Pca9685::new(i2c, Address::from(0x60))
+     .map_err(|_| anyhow::anyhow!("PCA9685 초기화 실패"))?;
     
-    // 2. I2C 설정 (D1 R32의 SDA: 21, SCL: 22)
-    let i2c = peripherals.i2c0;
-    let sda = peripherals.pins.gpio21;
-    let scl = peripherals.pins.gpio22;
-
-    let config = I2cConfig::new().baudrate(10.kHz().into());
-    let i2c_driver = I2cDriver::new(i2c, sda, scl, &config.baudrate(10.kHz().into()))?;
-    // I2C 설정 부분 수정
-/*let i2c_driver= I2cDriver::new(
-    peripherals.i2c0,
-    peripherals.pins.gpio21, // SDA
-    peripherals.pins.gpio22, // SCL
-    &I2cConfig::new()
-        .baudrate(10.kHz().into()) // 속도를 100kHz -> 10kHz로 낮춤 (안정성 확보)
-).map_err(|e| Err(e.to_string()))?;
-*/
-
-    // 3. PCA9685 드라이버 초기화 (I2C 주소 0x40)
-    //let mut pwm = Pca9685::new(i2c_driver, Address::default()).unwrap();
-    let mut pwm = Pca9685::new(i2c_driver, 0x60).map_err(|_| anyhow::anyhow!("PCA9685 초기화 실패"))?;
-    pwm.set_prescale(121).unwrap(); // 50Hz 설정 (서보 표준)
+    pwm.set_prescale(121).unwrap();
     pwm.enable().unwrap();
+    println!("✅ 모터 드라이버(PCA9685) 연결 성공!");
+    //---------------------------------------  
 
-    println!("🚀 0번 관절(Base) 테스트 시작! 90도로 고정합니다.");
-    
-    /* 
-    // PCA9685 초기화 시도
-    let mut pwm = match Pca9685::new(i2c_driver, Address::default()) {
-        Ok(mut driver) => {
-            println!("✅ PCA9685 연결 성공!");
-            driver.set_prescale(121).ok(); 
-            driver.enable().ok();
-            driver
-        },
-        Err(e) => {
-            println!("❌ PCA9685 찾기 실패: {:?}", e);
-            println!("👉 체크리스트: 1.실드 밀착 2.외부5V전원 3.I2C핀 확인");
-            // 에러가 나도 죽지 않고 무한 루프에서 대기 (하드웨어 점검 시간 벌기)
-            loop { FreeRtos::delay_ms(1000); }
-        }
-    };
-    */
-    println!("🎬 1번(C0)과 2번(C1) 모터 동시 테스트 시작!");
+    //println!("✅ 모터 드라이버(PCA9685) 연결 성공!");
 
-    // 초기 위치 설정
-    // [중요] 사진 속 'ㄱ'자 자세를 위한 목표 값
-    let mut pos0 = 325; // Base (정면)
-    let mut pos1 = 225; // Shoulder (초기 수직)
-    let mut pos2 = 325; // Elbow (초기 수직)
-    let mut pos3 = 325; // Wrist/Gripper (초기 수직)
+    // 핀 설정 (이전과 동일)
+    let mut dat = PinDriver::input(peripherals.pins.gpio19)?;
+    dat.set_pull(Pull::Up)?; 
+    let mut cmd = PinDriver::output(peripherals.pins.gpio23)?;
+    let mut clk = PinDriver::output(peripherals.pins.gpio18)?;
+    let mut att = PinDriver::output(peripherals.pins.gpio5)?;
 
-    // 수정된 안전 타겟 값
-let target_pos1 = 300; // 260보다 조금 더 세움 (하중을 뒤로 유지)
-let target_pos2 = 400; // 430보다 덜 뻗음 (무게 중심이 베이스 안에 머물도록)
+    cmd.set_high()?;
+    clk.set_high()?;
+    att.set_high()?;
 
-    println!("🏠 기본 자세(ㄱ자) 잡기 시작...");
+    // 이전 상태 저장용 변수 (버튼 2개 + 스틱 4개 = 총 6개)
+    let mut last_data = [0u8; 6]; 
 
-   // 순서 변경: 어깨를 더 세운 뒤에 팔꿈치를 아주 조금만 뻗습니다.
-//move_smoothly(&mut pwm, Channel::C1, &mut pos1, target_pos1); 
-//move_smoothly(&mut pwm, Channel::C2, &mut pos2, target_pos2); 
-    
-    // 3. 3번 모터(C3) 수평 유지 (325)
-    //move_smoothly(&mut pwm, Channel::C3, &mut pos3, 325);
+    println!("🚀 [이벤트 모드] 버튼을 누르거나 스틱을 움직일 때만 로그가 찍힙니다!");
 
-    // 1번 모터(Base) 단독 테스트
-println!("🏠 1번 모터(Base) 테스트 시작...");
-
-// 1번 모터(Base) 정면 고정 및 왕복 테스트 로직 예시
-let mut pos0: u16 = 325; // Base 정면 값
-let mut offset: i32 = 0;
-let mut direction: i32 = 1;
-
-println!("🚀 1번 모터(Base) 테스트 시작! 정면(325)으로 고정합니다.");
-
-    println!("✅ 기본 자세 유지 중. 이제 물리적 중심을 확인하세요!");
-
-    // 2. 어깨를 숙여 사과에 접근 (찾으신 475 지점)
-    //move_smoothly(pwm, Channel::C1, current_shoulder, SHOULDER_APPROACH);
-    move_smoothly(&mut pwm, Channel::C1, &mut pos0, SHOULDER_APPROACH);
-    // 기준점(Offset)을 찾기 위한 테스트 로직
-let mut offset = 0;
     loop {
+        att.set_low()?;
+        Ets::delay_us(15);
 
+        let mut current_data = [0u8; 6];
+        let commands = [0x01, 0x42, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
 
-   // 325를 기준으로 offset만큼 이동 (범위: 275 ~ 375)
-    let target_pos0 = (325 + offset) as u16;
-    
-    // 부드러운 이동 함수 호출
-    move_smoothly(&mut pwm, Channel::C0, &mut pos0, target_pos0);
-    
-    println!("📍 현재 포지션: {} (Offset: {})", pos0, offset);
-    
-    // 하중의 변화를 느끼기 위해 충분히 대기
-    thread::sleep(Duration::from_millis(500));
+        // 9바이트를 읽어야 스틱 4개(RX, RY, LX, LY) 데이터를 다 가져옵니다.
+        let mut full_response = [0u8; 9];
+        for i in 0..9 {
+            let mut byte = 0u8;
+            for bit in 0..8 {
+                if (commands[i] & (1 << bit)) != 0 { cmd.set_high()?; } else { cmd.set_low()?; }
+                clk.set_low()?;
+                Ets::delay_us(10);
+                if dat.get_level() == Level::High { byte |= 1 << bit; }
+                clk.set_high()?;
+                Ets::delay_us(10);
+            }
+            full_response[i] = byte;
+        }
+        att.set_high()?;
 
-    // 왕복 제어 로직
-    offset += 10 * direction;
-    if offset.abs() >= 50 { 
-        direction *= -1; 
-        println!("🔄 방향 전환!");
-    }
-    
-    // 이 위치가 정면이라면, 325 + offset이 당신의 새로운 '기준점'입니다.
-    //thread::sleep(Duration::from_millis(100));
-          
-        // --- 1단계: 두 모터 모두 0도 근처 ---
-        println!("📍 Position: 0도");
-        //pwm.set_channel_on_off(pwm_pca9685::Channel::C0, 0, 150).ok();
-        /// 2번 모터 (오늘 추가!)
-        //FreeRtos::delay_ms(2000);
+        // 실제 유의미한 데이터 추출
+        // [버튼1, 버튼2, RX, RY, LX, LY]
+        let current_payload = [
+            full_response[3], full_response[4], 
+            full_response[5], full_response[6], 
+            full_response[7], full_response[8]
+        ];
 
+        // [비밀] 데이터에 변화가 있을 때만 출력!
+        if full_response[2] == 0x5A && current_payload != last_data {
 
-        /*
-        // --- 2단계: 두 모터 모두 90도 ---
-        println!("📍 Position: 90도");
-        pwm.set_channel_on_off(pwm_pca9685::Channel::C0, 0, 325).ok();
-        pwm.set_channel_on_off(pwm_pca9685::Channel::C1, 0, 325).ok();
-        FreeRtos::delay_ms(2000);
+            let b1 = current_payload[0]; // 첫 번째 버튼 바이트 (Select, L3, R3, Start, Up, Right, Down, Left)
+            let b2 = current_payload[1]; // 두 번째 버튼 바이트 (L2, R2, L1, R1, △, ○, ❌, □)
 
-        // --- 3단계: 두 모터 모두 180도 ---
-        println!("📍 위치: 180도");
-        pwm.set_channel_on_off(pwm_pca9685::Channel::C0, 0, 500).ok();
-        pwm.set_channel_on_off(pwm_pca9685::Channel::C1, 0, 500).ok();
-        FreeRtos::delay_ms(2000);
-        */
-
-      // 1번 모터(C0) 0도로 이동
-        /* 
-        println!("📍 1번 모터: 0도 이동 중...");
-        move_smoothly(&mut pwm, Channel::C0, &mut pos0, 150, 20);
+           println!("🔔 컨트롤러 입력 감지!");
         
-        // 2번 모터(C1) 0도로 이동
-        println!("📍 2번 모터: 0도 이동 중...");
-        move_smoothly(&mut pwm, Channel::C1, &mut pos1, 150, 20);
-        
-        FreeRtos::delay_ms(1000);
-        */
+            // --- 버튼 이름 판별 (비트가 0일 때 눌린 것) ---
+            print!("👉 누른 버튼: ");
+            if b2 & 0x10 == 0 { print!("[△ TRIANGLE] "); }
+            if b2 & 0x20 == 0 { print!("[○ CIRCLE] "); }
+            if b2 & 0x40 == 0 { print!("[❌ CROSS] "); }
+            if b2 & 0x80 == 0 { print!("[□ SQUARE] "); }
+            
+            if b2 & 0x01 == 0 { print!("[L2] "); }
+            if b2 & 0x02 == 0 { print!("[R2] "); }
+            if b2 & 0x04 == 0 { print!("[L1] "); }
+            if b2 & 0x08 == 0 { print!("[R1] "); }
 
-        // 다시 90도로 복귀
-        println!("📍 모든 모터 90도로 복귀 중...");
-        
-        FreeRtos::delay_ms(1000); 
+            if b1 & 0x10 == 0 { print!("[↑ UP] "); }
+            if b1 & 0x40 == 0 { print!("[↓ DOWN] "); }
+            if b1 & 0x80 == 0 { print!("[← LEFT] "); }
+            if b1 & 0x20 == 0 { print!("[→ RIGHT] "); }
+            
+            if b1 & 0x01 == 0 { print!("[SELECT] "); }
+            if b1 & 0x08 == 0 { print!("[START] "); }
+            println!(); // 줄바꿈
 
+            // --- 스틱 값 출력 ---
+            println!("🕹️ 스틱 L: ({:3}, {:3}) | R: ({:3}, {:3})", 
+                    current_payload[4], current_payload[5],  // LX, LY
+                    current_payload[2], current_payload[3]); // RX, RY
+            println!("------------------------------------"); 
+
+            // 현재 상태를 저장
+            last_data = current_payload;
+        }
+
+        FreeRtos::delay_ms(20);
     }
 }
 
-/// target_pos: 목표 펄스 값
-// 부드러운 이동 함수 (20ms의 안전 지연)
-fn move_smoothly(pwm: &mut Pca9685<I2cDriver>, channel: Channel, current: &mut u16, target: u16) {
-    while *current != target {
-        if *current < target { *current += 1; } else { *current -= 1; }
-        let _ = pwm.set_channel_on_off(channel, 0, *current);
-        FreeRtos::delay_ms(20); // 오늘은 이 속도가 생명줄입니다. ㅋ
-    }
-}
-
-fn go_to_ready_pose(pwm: &mut Pca9685<I2cDriver>, current_base: &mut u16, current_shoulder: &mut u16) {
-    println!("🍎 사과 깎기 준비 자세로 전환합니다...");
-    
-    // 1. 베이스 정면 정렬
-    move_smoothly(pwm, Channel::C0, current_base, BASE_CENTER as u16);
-    
-    // 2. 어깨를 숙여 사과에 접근 (찾으신 475 지점)
-    move_smoothly(pwm, Channel::C1, current_shoulder, SHOULDER_APPROACH);
-    
-    println!("✅ 준비 완료! 사과를 가져다주세요.");
+// 이런 식으로 버튼 비트를 체크하는 함수를 넣으면 좋습니다.
+fn print_button_name(b1: u8, b2: u8) {
+    if b1 & 0x40 == 0 { println!("🔘 Pressed: Cross (X)"); }
+    if b1 & 0x20 == 0 { println!("🔘 Pressed: Circle (○)"); }
+    if b1 & 0x80 == 0 { println!("🔘 Pressed: Square (□)"); }
+    if b1 & 0x10 == 0 { println!("🔘 Pressed: Triangle (△)"); }
+    // ... 나머지 버튼들도 이런 식으로 추가 가능
 }
