@@ -29,7 +29,9 @@ esp-idf-svc = "0.51"
 esp-idf-hal = "0.45"  # 버전을 0.45로 올려주세요!
 esp-idf-sys = "0.36"  # 얘도 같이 올려주는 게 좋습니다.
 pwm-pca9685 = "1.0.0" # 최신 버전으로 갈아타시죠!
-embedded-hal = "1.0.0"
+embedded-hal = "1.0"
+shared-bus = { version = "0.3", features = ["std"] }
+embedded-hal-bus = { version = "0.2.0", features = ["std"]}
 
 # --- Optional Embassy Integration ---
 # esp-idf-svc = { version = "0.51", features = ["critical-section", "embassy-time-driver", "embassy-sync"] }
