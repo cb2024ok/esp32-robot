@@ -120,30 +120,54 @@ fn main() -> Result<()> {
         (0, "베이스", Channel::C0),
         (1, "어깨",   Channel::C1),
         (2, "팔꿈치", Channel::C2),
-    ]; 
+        (3, "손목/칼날", Channel::C3),
+    ];
+
+    // 초기 위치 저장용 변수
+    let mut current_positions = [300u16; 4]; // 0~3번 관절 초기값
 
     log::info!("=== 관절로봇 테스트 시작 ===");
     loop {
         for (id, name, channel) in channels.iter() {
             println!("🔔 {}번 {} 모터 작동 테스트", id, name);
 
+            let idx = *id as usize;
+
             match *id {
                 0 => { // 베이스: 시원하게 회전
-                    pwm.set_channel_on_off(*channel, 0, 150).unwrap();
+                    move_arm_smooth(&mut pwm, *channel, &mut current_positions[idx], 150);
                     FreeRtos::delay_ms(1200);
-                    pwm.set_channel_on_off(*channel, 0, 450).unwrap();
+                    move_arm_smooth(&mut pwm, *channel, &mut current_positions[idx], 450);
+                    FreeRtos::delay_ms(1000);
                 },
                 1 => { // 어깨: 너무 구부리지 않게 범위 축소 (80도 ~ 110도)
                     println!("   -> 어깨는 조심조심 (안전 범위)");
-                    pwm.set_channel_on_off(*channel, 0, 280).unwrap(); // 살짝만 숙임
+                    move_arm_smooth(&mut pwm, *channel, &mut current_positions[idx], 280);
                     FreeRtos::delay_ms(1200);
-                    pwm.set_channel_on_off(*channel, 0, 330).unwrap(); // 살짝만 듦
+                    move_arm_smooth(&mut pwm, *channel, &mut current_positions[idx], 330);
+                    FreeRtos::delay_ms(1000);
                 },
                 2 => { // 팔꿈치: 새로 추가된 관절 테스트
                     println!("   -> 팔꿈치 처음으로 움직입니다!");
-                    pwm.set_channel_on_off(*channel, 0, 250).unwrap(); 
-                    FreeRtos::delay_ms(1200);
-                    pwm.set_channel_on_off(*channel, 0, 350).unwrap();
+                    // 350 위치로 부드럽게 이동
+                    move_arm_smooth(&mut pwm, *channel, &mut current_positions[idx], 350);
+                    FreeRtos::delay_ms(1000);
+
+                    // 250 위치로 부드럽게 이동
+                    move_arm_smooth(&mut pwm, *channel, &mut current_positions[idx], 250);
+                    FreeRtos::delay_ms(1000);
+                },
+                3 => { // 3. 팔꿈치: 새로 추가된 관절 테스트
+                   // 1. 최소 안전 각도 (예: 팔을 가볍게 굽힘)
+                    println!("   -> 굽히기 (Safe Zone)");
+                    move_arm_smooth(&mut pwm, *channel, &mut current_positions[idx], 260);
+                    FreeRtos::delay_ms(1500);
+
+                    // 2. 최대 안전 각도 (예: 팔을 가볍게 폄)
+                    println!("   -> 펴기 (Safe Zone)");
+                    move_arm_smooth(&mut pwm, *channel, &mut current_positions[idx], 340);
+                    FreeRtos::delay_ms(1500);
+
                 },
                 _ => {}
             }
@@ -168,4 +192,49 @@ fn move_to_target(driver: &mut LedcDriver, current: &mut u32, target: u32) -> an
         FreeRtos::delay_ms(15); // 안정적인 스텝 간격
     }
     Ok(())
+}
+
+// PCA9685 전용 부드러운 이동 로직 (예시)
+fn move_pca_smooth(
+    pwm: &mut Pca9685<RefCellDevice<'_, I2cDriver<'_>>>, 
+    channel: Channel, 
+    from: u16, 
+    to: u16
+) {
+    let step = if from < to { 1 } else { -1 };
+    let mut current = from;
+    
+    while current != to {
+        current = (current as i16 + step) as u16;
+        pwm.set_channel_on_off(channel, 0, current).unwrap();
+        FreeRtos::delay_ms(10); // 안정성을 위해 조금씩 이동 [cite: 2026-02-13]
+    }
+}
+
+// [안정성 강화] 목표 각도까지 가속/감속하며 이동하는 함수 [cite: 2026-02-13]
+fn move_arm_smooth(
+    pwm: &mut Pca9685<RefCellDevice<'_, I2cDriver<'_>>>,
+    channel: Channel,
+    current_pos: &mut u16,
+    target_pos: u16,
+) {
+    let diff = (target_pos as i32 - *current_pos as i32).abs();
+    if diff == 0 { return; }
+
+    let steps = 20; // 분할 단계 (클수록 더 부드러움)
+    
+    for i in 1..=steps {
+        // Sine 함수를 이용한 부드러운 보간 (0.0 ~ 1.0)
+        let t = i as f32 / steps as f32;
+        let ease_step = (1.0 - (t * std::f32::consts::PI).cos()) / 2.0;
+        
+        let next_pos = (*current_pos as f32 + (target_pos as i32 - *current_pos as i32) as f32 * ease_step) as u16;
+        
+        pwm.set_channel_on_off(channel, 0, next_pos).unwrap();
+        
+        // 이동 중 물리적 부하 분산을 위한 짧은 대기 [cite: 2026-02-13]
+        FreeRtos::delay_ms(20); 
+    }
+    
+    *current_pos = target_pos;
 }
