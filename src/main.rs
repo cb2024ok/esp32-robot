@@ -9,6 +9,7 @@ use esp_idf_hal::peripherals::Peripherals;
 use anyhow::Result;
 use esp_idf_hal::units::Hertz;
 use esp_idf_svc::http::status::OK;
+use esp_idf_sys::COLL_WEIGHTS_MAX;
 use pwm_pca9685::{Address, Pca9685,Channel};
 use esp_idf_hal::ledc::*;
 
@@ -117,65 +118,161 @@ fn main() -> Result<()> {
 
     // 테스트할 채널 목록 (0번부터 5번까지)
    let channels = [
-        (0, "베이스", Channel::C0),
+        //(0, "베이스", Channel::C0),
         (1, "어깨",   Channel::C1),
         (2, "팔꿈치", Channel::C2),
-        (3, "손목/칼날", Channel::C3),
+        //(3, "손목/칼날", Channel::C3),
     ];
+
+    // 1. 루프 시작 전 초기 위치 설정 (위쪽으로 접힌 자세 예시: 400)
+    let mut current_pos_shoulder = 400u16;
+
+    // ----------- Motor #1 adjust start -------------------------------------------//
+    // 위쪽(450)으로 먼저 움직여서 공간 확보
+    //let target_upper = 450; 
+    let target_upper = 550; 
+    move_arm_smooth(&mut pwm, Channel::C1, &mut current_pos_shoulder, target_upper);
+    println!("#1 위쪽(550)으로 먼저 움직여서 공간 확보");
+    FreeRtos::delay_ms(1000);
+    
+    // 다시 중간(350)으로 복귀
+    //move_arm_smooth(&mut pwm, Channel::C1, &mut current_pos_shoulder, 350);
+    //println!("#1 다시 중간(300)으로 복귀");
+     
+    //--------- #1 모터 adjust end -------------------------------------------------//
 
     // 초기 위치 저장용 변수
     let mut current_positions = [300u16; 4]; // 0~3번 관절 초기값
+    
+    // 1. 모든 모터의 '현재 위치'를 기억할 변수들을 루프 밖에서 초기화합니다.
+    // 사진 속의 적당한 위치를 400(어깨), 350(팔꿈치) 정도로 가정합니다.
+    let mut shoulder_pos = 400u16; 
+    //let mut elbow_pos = 350u16;
+    let mut elbow_pos = 300u16;
+    let mut base_pos = 300u16;
+    let mut wrist_pos = 300u16;
 
-    log::info!("=== 관절로봇 테스트 시작 ===");
+    println!("=== 관절로봇 테스트 시작 ===");
+
+     //println!("🔔 2번 팔꿈치 모터 - 180...");
+    //                move_arm_smooth(&mut pwm, Channel::C2, &mut elbow_pos, 180);
+                    //move_arm_smooth(&mut pwm, *channel, &mut elbow_pos, 100);
+                    //move_arm_smooth(&mut pwm, *channel, &mut elbow_pos, 100);
+    
+    println!("🔔 1번 어깨 모터 (위쪽 Safe Zone)");
+                    // 사진의 위치(400)에서 위아래로 살짝만 움직여 부하 최소화
+                    move_arm_smooth(&mut pwm, Channel::C1, &mut shoulder_pos, 360); // 위로 더 들기
+                    FreeRtos::delay_ms(1200);
+     /*move_arm_smooth(&mut pwm, Channel::C1, &mut current_pos_shoulder, target_upper);
+    println!("#1 위쪽(550)으로 먼저 움직여서 공간 확보");
+    FreeRtos::delay_ms(1000);
+    */
+
     loop {
-        for (id, name, channel) in channels.iter() {
+        
+        /*for (id, name, channel) in channels.iter() {
             println!("🔔 {}번 {} 모터 작동 테스트", id, name);
 
             let idx = *id as usize;
 
             match *id {
-                0 => { // 베이스: 시원하게 회전
-                    move_arm_smooth(&mut pwm, *channel, &mut current_positions[idx], 150);
-                    FreeRtos::delay_ms(1200);
-                    move_arm_smooth(&mut pwm, *channel, &mut current_positions[idx], 450);
+                /*0 => { // 베이스: 시원하게 회전
+                    log::info!("🔔 0번 베이스 모터 작동");
+                    move_arm_smooth(&mut pwm, *channel, &mut base_pos, 150);
                     FreeRtos::delay_ms(1000);
+                    move_arm_smooth(&mut pwm, *channel, &mut base_pos, 450); 
                 },
+                */
                 1 => { // 어깨: 너무 구부리지 않게 범위 축소 (80도 ~ 110도)
-                    println!("   -> 어깨는 조심조심 (안전 범위)");
-                    move_arm_smooth(&mut pwm, *channel, &mut current_positions[idx], 280);
+                    log::info!("🔔 1번 어깨 모터 (위쪽 Safe Zone)");
+                    // 사진의 위치(400)에서 위아래로 살짝만 움직여 부하 최소화
+                    move_arm_smooth(&mut pwm, *channel, &mut shoulder_pos, 400); // 위로 더 들기
                     FreeRtos::delay_ms(1200);
-                    move_arm_smooth(&mut pwm, *channel, &mut current_positions[idx], 330);
-                    FreeRtos::delay_ms(1000);
+                    //move_arm_smooth(&mut pwm, *channel, &mut shoulder_pos, 380); // 살짝 내리기 
                 },
                 2 => { // 팔꿈치: 새로 추가된 관절 테스트
-                    println!("   -> 팔꿈치 처음으로 움직입니다!");
-                    // 350 위치로 부드럽게 이동
-                    move_arm_smooth(&mut pwm, *channel, &mut current_positions[idx], 350);
+                    log::info!("🔔 2번 팔꿈치 모터");
+                    move_arm_smooth(&mut pwm, *channel, &mut elbow_pos, 480);
+                    //move_arm_smooth(&mut pwm, *channel, &mut elbow_pos, 100);
                     FreeRtos::delay_ms(1000);
-
-                    // 250 위치로 부드럽게 이동
-                    move_arm_smooth(&mut pwm, *channel, &mut current_positions[idx], 250);
-                    FreeRtos::delay_ms(1000);
+                    //move_arm_smooth(&mut pwm, *channel, &mut elbow_pos, 320); 
                 },
-                3 => { // 3. 팔꿈치: 새로 추가된 관절 테스트
+                /*3 => { // 3. 팔꿈치: 새로 추가된 관절 테스트
                    // 1. 최소 안전 각도 (예: 팔을 가볍게 굽힘)
-                    println!("   -> 굽히기 (Safe Zone)");
+                    log::info!("   -> 굽히기 (Safe Zone)");
                     move_arm_smooth(&mut pwm, *channel, &mut current_positions[idx], 260);
                     FreeRtos::delay_ms(1500);
 
                     // 2. 최대 안전 각도 (예: 팔을 가볍게 폄)
-                    println!("   -> 펴기 (Safe Zone)");
+                    log::info!("   -> 펴기 (Safe Zone)");
                     move_arm_smooth(&mut pwm, *channel, &mut current_positions[idx], 340);
                     FreeRtos::delay_ms(1500);
 
-                },
+                },*/
                 _ => {}
             }
-            
-            // 다음 모터 테스트 전 중립(300)으로 복귀하여 안정성 확보
-            pwm.set_channel_on_off(*channel, 0, 300).unwrap();
+            */
+            // [안정성] 테스트 후 사진 속의 그 '적당한 위치'로 매번 복귀
+            /*if *id == 1 {
+                move_arm_smooth(&mut pwm, *channel, &mut shoulder_pos, 550);
+            } else {
+                pwm.set_channel_on_off(*channel, 0, 300).unwrap();
+            }*/
+
+           
+
+            // Motor #1번 테스트..
+            /*let mut delta=240; 
+            for i in 0..=8 {
+                println!("🔔 1번 어깨 모터 (위쪽 Safe Zone) - {}",delta);                /// 사진의 위치(400)에서 위아래로 살짝만 움직여 부하 최소화
+                move_arm_smooth(&mut pwm, Channel::C1, &mut shoulder_pos, delta); // 위로 더 들기
+                delta += 20;
+                FreeRtos::delay_ms(1500);
+            }
+
+            println!("✅ 최고점 도달, 잠시 휴식...");
+            FreeRtos::delay_ms(2000);
+            */
+
+            // 1. 먼저 어깨(1번)를 가장 안정적인 위치인 400으로 보냅니다.
+            /*move_arm_smooth(&mut pwm, Channel::C1, &mut shoulder_pos, 400);
             FreeRtos::delay_ms(1000);
-        }
+
+            // 2. 어깨가 고정된 상태에서 팔꿈치(2번)의 가동 범위를 테스트합니다.
+            let mut elbow_delta = 150; 
+            for i in 0..=10 {
+                println!("🔔 2번 팔꿈치 관절 테스트 중: {}", elbow_delta);
+                move_arm_smooth(&mut pwm, Channel::C2, &mut elbow_pos, elbow_delta);
+                elbow_delta += 20;
+                FreeRtos::delay_ms(1000);
+            }
+            */
+
+            // 2단계: 안전하게 초기 위치로 복귀 (400 -> 240)
+            // 갑자기 툭 떨어지면 기어가 나갈 수 있으니 다시 부드럽게 내립니다.
+            //println!("⬇️ 1번 어깨 안전 복귀 시작");
+            //move_arm_smooth(&mut pwm, Channel::C1, &mut shoulder_pos, 240);
+
+             // Motor #2 -- TESI code..
+            /*let mut Counter = 150;
+            for i in 0..=10 {
+                Counter += 10;
+                println!("🔔 2번 팔꿈치 모터 - {}...",Counter);
+                move_arm_smooth(&mut pwm, Channel::C2, &mut elbow_pos, Counter);
+                FreeRtos::delay_ms(1000);
+            }
+            */
+
+        // 1번(어깨)은 상승(400), 2번(팔꿈치)은 하강(150)
+        move_arms_simultaneous(&mut pwm, 400, 150, &mut shoulder_pos, &mut elbow_pos);
+        FreeRtos::delay_ms(2000);
+
+        // 반대로 교차: 1번 하강(240), 2번 상승(350)
+        move_arms_simultaneous(&mut pwm, 240, 350, &mut shoulder_pos, &mut elbow_pos);
+        FreeRtos::delay_ms(2000);    
+        
+        println!("Done...");
+        FreeRtos::delay_ms(2000);
 
     } 
 }
@@ -221,7 +318,7 @@ fn move_arm_smooth(
     let diff = (target_pos as i32 - *current_pos as i32).abs();
     if diff == 0 { return; }
 
-    let steps = 20; // 분할 단계 (클수록 더 부드러움)
+    let steps = 40; // 분할 단계 (클수록 더 부드러움)
     
     for i in 1..=steps {
         // Sine 함수를 이용한 부드러운 보간 (0.0 ~ 1.0)
@@ -233,8 +330,47 @@ fn move_arm_smooth(
         pwm.set_channel_on_off(channel, 0, next_pos).unwrap();
         
         // 이동 중 물리적 부하 분산을 위한 짧은 대기 [cite: 2026-02-13]
-        FreeRtos::delay_ms(20); 
+        FreeRtos::delay_ms(15); 
     }
     
     *current_pos = target_pos;
+}
+
+// [안정성 강화] 1번(상승) & 2번(하강) 교차 동시 제어 로직
+fn move_arms_simultaneous(
+    pwm: &mut Pca9685<RefCellDevice<'_, I2cDriver<'_>>>,
+    target_1: u16,
+    target_2: u16,
+    current_1: &mut u16,
+    current_2: &mut u16,
+) {
+    let steps = 50; // 동시 동작이므로 단계를 더 세분화해서 부하 분산
+    
+    let start_1 = *current_1 as f32;
+    let start_2 = *current_2 as f32;
+    let diff_1 = target_1 as f32 - start_1;
+    let diff_2 = target_2 as f32 - start_2;
+
+    println!("🚀 동시 동작 시작: [1번] {}->{}, [2번] {}->{}", *current_1, target_1, *current_2, target_2);
+
+    for i in 1..=steps {
+        let t = i as f32 / steps as f32;
+        // Sine Ease-in-out 보간 (부드러운 가속/감속) [cite: 2026-02-13]
+        let ease = (1.0 - (t * std::f32::consts::PI).cos()) / 2.0;
+
+        let next_1 = (start_1 + diff_1 * ease) as u16;
+        let next_2 = (start_2 + diff_2 * ease) as u16;
+
+        // 두 모터 신호를 거의 동시에 쏴줍니다.
+        pwm.set_channel_on_off(Channel::C1, 0, next_1).unwrap();
+        pwm.set_channel_on_off(Channel::C2, 0, next_2).unwrap();
+
+        // 7.4V 전력이 안정적이더라도, 두 모터가 동시에 움직일 때의 
+        // 전압 강하를 방지하기 위해 미세한 딜레이를 줍니다.
+        FreeRtos::delay_ms(20); 
+    }
+
+    *current_1 = target_1;
+    *current_2 = target_2;
+    println!("✅ 동시 동작 완료!");
 }
