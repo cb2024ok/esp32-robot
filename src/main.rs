@@ -1,8 +1,10 @@
 use std::cell::RefCell;
+use std::f32::consts::PI;
 
+use embedded_hal::delay;
 use embedded_hal::i2c::I2c;
 use embedded_hal_bus::i2c::RefCellDevice;
-use esp_idf_hal::delay::{Ets, FreeRtos};
+use esp_idf_hal::delay::{Delay, Ets, FreeRtos};
 use esp_idf_hal::gpio::*;
 use esp_idf_hal::i2c::{I2cConfig, I2cDriver};
 use esp_idf_hal::peripherals::Peripherals;
@@ -10,7 +12,8 @@ use anyhow::Result;
 use esp_idf_hal::units::Hertz;
 use esp_idf_svc::http::status::OK;
 use esp_idf_sys::COLL_WEIGHTS_MAX;
-use pwm_pca9685::{Address, Pca9685,Channel};
+//use pwm_pca9685::{Address, Pca9685,Channel};
+use pwm_pca9685::*;
 use esp_idf_hal::ledc::*;
 
 const TICK_PERIOD_MS: u32 = 1;
@@ -25,6 +28,11 @@ const DEADZONE: i16 = 15;
 const SENSITIVITY: f32 = 2.0; // 한 번의 루프에서 변할 최대 각도
 const MIN_ANGLE: f32 = 0.0;
 const MAX_ANGLE: f32 = 180.0;
+
+// [cite: 2026-02-13] 안정성을 위한 상수 설정
+const STEPS: usize = 60; // 궤적 분할 수 (안정적인 이동을 위해 설정)
+const SERVO_MIN: u16 = 150; // RDS3225 최소 펄스
+const SERVO_MAX: u16 = 600; // RDS3225 최대 펄스
 
 pub struct RobotArmController {
     pub master_id: usize,        // 현재 선택된 모터 번호 (0~5)
@@ -68,6 +76,45 @@ enum RobotState {
     Idle,       // 대기 (중립 위치)
     Scanning,   // 사과 위치 탐색 (좌우 회전)
     Preparing,  // 깎기 시작 지점으로 이동
+}
+
+// [cite: 2026-02-02] I2C 제네릭을 추가하여 어떤 I2C 장치든 대응 가능하게 수정
+pub struct RobotArm3Axis<I2C> {
+    pub current_angles: [f32; 3],
+    pub _marker: core::marker::PhantomData<I2C>, // 타입을 저장하기 위한 마커
+}
+
+impl<I2C> RobotArm3Axis<I2C>  where I2C: embedded_hal::i2c::I2c  {
+    // [cite: 2026-02-02, 2026-02-13] Sine Interpolation 기반 부드러운 3축 이동
+    fn move_to_target(&mut self, pca9685: &mut Pca9685<I2C>, target_angles: [f32; 3], delay: &Delay) 
+    {
+        let start_angles = self.current_angles;
+
+        for step in 0..=STEPS {
+            let t = step as f32 / STEPS as f32;
+            // [cite: 2026-02-02] Sine Ramp: 가속과 감속을 부드럽게 (Grok's favorite!)
+            let s = (1.0 - (t * PI).cos()) / 2.0; 
+
+            for i in 0..3 {
+                let interpolated_angle = start_angles[i] + (target_angles[i] - start_angles[i]) * s;
+                
+                // [cite: 2026-02-06] Safety: 각 관절별 Soft Limit 적용 (0~180도)
+                let safe_angle = interpolated_angle.clamp(0.0, 180.0);
+                
+                // PCA9685 채널 0, 1, 2에 각각 전송 [cite: 2026-01-29, 2026-02-23]
+                let pulse = self.angle_to_pulse(safe_angle);
+                let channels = [Channel::C0, Channel::C1, Channel::C2];
+                //let target_channel = Channel::from(i as u8) ;
+                pca9685.set_channel_on_off(channels[i],  0, pulse).unwrap(); //set_pwm(i as u8, 0, pulse).unwrap();
+            }
+            delay.delay_ms(20u32); // [cite: 2026-02-13] 50Hz 주기에 맞춘 안정적인 딜레이
+        }
+        self.current_angles = target_angles;
+    }
+
+    fn angle_to_pulse(&self, angle: f32) -> u16 {
+        (SERVO_MIN as f32 + (angle / 180.0) * (SERVO_MAX - SERVO_MIN) as f32) as u16
+    }
 }
 
 fn main() -> Result<()> {
@@ -264,13 +311,22 @@ fn main() -> Result<()> {
             */
 
         // 1번(어깨)은 상승(400), 2번(팔꿈치)은 하강(150)
-        move_arms_simultaneous(&mut pwm, 400, 150, &mut shoulder_pos, &mut elbow_pos);
+        /*move_arms_simultaneous(&mut pwm, 400, 150, &mut shoulder_pos, &mut elbow_pos);
         FreeRtos::delay_ms(2000);
 
         // 반대로 교차: 1번 하강(240), 2번 상승(350)
         move_arms_simultaneous(&mut pwm, 240, 350, &mut shoulder_pos, &mut elbow_pos);
         FreeRtos::delay_ms(2000);    
-        
+        */
+
+        let mut arm = RobotArm3Axis { current_angles: [90.0, 90.0, 90.0],_marker: todo!()};
+    
+    // 사과 표면에 접근하는 3축 복합 동작 [cite: 2026-01-24, 2026-02-23]
+    let apple_touch_pose = [45.0, 120.0, 30.0]; 
+    // 1. 아마 위쪽 어딘가에 이렇게 선언되어 있을 겁니다. [cite: 2026-02-02]
+    let delay_driver =  Delay::new(600_000_000); //Delay::new(peripherals.CPULP); // 예시
+    arm.move_to_target(&mut pwm, apple_touch_pose, &delay_driver);
+
         println!("Done...");
         FreeRtos::delay_ms(2000);
 
