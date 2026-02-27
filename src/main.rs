@@ -1,9 +1,11 @@
 use std::cell::RefCell;
 use std::f32::consts::PI;
+use std::marker::PhantomData;
 
 use embedded_hal::delay;
 use embedded_hal::i2c::I2c;
 use embedded_hal_bus::i2c::RefCellDevice;
+use esp_idf_hal::cpu::core;
 use esp_idf_hal::delay::{Delay, Ets, FreeRtos};
 use esp_idf_hal::gpio::*;
 use esp_idf_hal::i2c::{I2cConfig, I2cDriver};
@@ -214,6 +216,7 @@ fn main() -> Result<()> {
     println!("#1 위쪽(550)으로 먼저 움직여서 공간 확보");
     FreeRtos::delay_ms(1000);
     */
+    let mut currents = [shoulder_pos, elbow_pos, wrist_pos, 300u16];
 
     loop {
         
@@ -319,16 +322,76 @@ fn main() -> Result<()> {
         FreeRtos::delay_ms(2000);    
         */
 
-        let mut arm = RobotArm3Axis { current_angles: [90.0, 90.0, 90.0],_marker: todo!()};
+        /* 
+        let mut arm: RobotArm3Axis<RefCellDevice<'_, I2cDriver<'_>>> = RobotArm3Axis { 
+            current_angles: [90.0, 90.0, 90.0],_marker: PhantomData };
     
-    // 사과 표면에 접근하는 3축 복합 동작 [cite: 2026-01-24, 2026-02-23]
-    let apple_touch_pose = [45.0, 120.0, 30.0]; 
-    // 1. 아마 위쪽 어딘가에 이렇게 선언되어 있을 겁니다. [cite: 2026-02-02]
-    let delay_driver =  Delay::new(600_000_000); //Delay::new(peripherals.CPULP); // 예시
-    arm.move_to_target(&mut pwm, apple_touch_pose, &delay_driver);
+        // 사과 표면에 접근하는 3축 복합 동작 [cite: 2026-01-24, 2026-02-23]
+        let apple_touch_pose = [45.0, 120.0, 30.0]; 
+        // 1. 아마 위쪽 어딘가에 이렇게 선언되어 있을 겁니다. [cite: 2026-02-02]
+        let delay_driver =  Delay::new(600_000_000); //Delay::new(peripherals.CPULP); // 예시
+        arm.move_to_target(&mut pwm, apple_touch_pose, &delay_driver);
 
         println!("Done...");
         FreeRtos::delay_ms(2000);
+        */
+
+      /*  
+        // 2. 다시 중립으로 (450 -> 300)
+    println!("   -> 중립 복귀");
+    move_arm_safe_power(&mut pwm, Channel::C3, &mut wrist_pos, 300);
+    FreeRtos::delay_ms(1000);
+
+    // 3. 반시계 방향으로 천천히 (300 -> 150)
+    println!("   -> 각도 감소 (반대 방향)");
+    move_arm_safe_power(&mut pwm, Channel::C3, &mut wrist_pos, 150);
+    FreeRtos::delay_ms(1500);
+
+    // 4. 최종 안전 위치로 복귀
+    move_arm_safe_power(&mut pwm, Channel::C3, &mut wrist_pos, 300);
+    println!("✅ 3번 관절 테스트 1주기 완료. 3초 대기...");
+    FreeRtos::delay_ms(3000);
+    */
+
+    /* 
+    println!("🔔 4번 관절(그리퍼/회전) 테스트 시작");
+
+    // 4번 관절용 초기 위치 (중립 300 가정)
+    let mut joint_4_pos = 300u16; 
+    
+    // 1. 부드럽게 한쪽으로 이동 (그리퍼 열기/칼날 회전)
+    println!("   -> 4번 이동 (300 -> 420)");
+    move_arm_safe_power(&mut pwm, Channel::C4, &mut joint_4_pos, 420);
+    FreeRtos::delay_ms(1500);
+
+    // 2. 다시 중립으로 복귀
+    println!("   -> 중립 복귀 (420 -> 300)");
+    move_arm_safe_power(&mut pwm, Channel::C4, &mut joint_4_pos, 300);
+    FreeRtos::delay_ms(1000);
+
+    // 3. 반대쪽으로 이동 (그리퍼 닫기/칼날 역회전)
+    println!("   -> 4번 반대 이동 (300 -> 180)");
+    move_arm_safe_power(&mut pwm, Channel::C4, &mut joint_4_pos, 180);
+    FreeRtos::delay_ms(1500);
+
+    // 4. 안전 위치 복귀
+    move_arm_safe_power(&mut pwm, Channel::C4, &mut joint_4_pos, 300);
+    println!("✅ 4번 관절 테스트 완료. 3초 후 재시작...");
+    FreeRtos::delay_ms(3000); 
+    */
+
+    // 유기적으로 움직임 테스트..:
+    // 준비자세..
+    /*move_4axis_organic(&mut pwm, [400, 300, 300, 300], &mut currents);
+
+    move_4axis_organic(&mut pwm, [450, 480, 250, 420], &mut currents);
+    */
+
+    // 나선향 궤적 연습..
+    //run_apple_spiral_test(&mut pwm, &mut currents);
+
+    // 사과 깎기 통합 시퀀스 (Full Sequence)
+    run_full_apple_sequence(&mut pwm, &mut currents);
 
     } 
 }
@@ -429,4 +492,141 @@ fn move_arms_simultaneous(
     *current_1 = target_1;
     *current_2 = target_2;
     println!("✅ 동시 동작 완료!");
+}
+
+// 기존 move_arm_smooth를 조금 더 '신중하게' 개선
+fn move_arm_safe_power(
+    pwm: &mut Pca9685<RefCellDevice<'_, I2cDriver<'_>>>,
+    channel: Channel,
+    current_pos: &mut u16,
+    target_pos: u16,
+) {
+    let steps = 100; // 단계를 더 세분화하여 7.4V의 반동을 억제
+    let start = *current_pos as f32;
+    let diff = target_pos as f32 - start;
+
+    for i in 1..=steps {
+        let t = i as f32 / steps as f32;
+        // 더 깊은 Sine 곡선으로 시작과 끝을 아주 부드럽게 처리
+        let ease = (1.0 - (t * std::f32::consts::PI).cos()) / 2.0;
+        let next_pos = (start + diff * ease) as u16;
+
+        pwm.set_channel_on_off(channel, 0, next_pos).unwrap();
+        
+        // 고전압 모터의 빠른 반응성에 맞춰 딜레이를 최적화 (10~15ms)
+        FreeRtos::delay_ms(12); 
+    }
+    *current_pos = target_pos;
+}
+
+// [안정성 & 유기적 제어] 1, 2, 3, 4번 관절 통합 동시 제어
+fn move_4axis_organic(
+    pwm: &mut Pca9685<RefCellDevice<'_, I2cDriver<'_>>>,
+    targets: [u16; 4],      // [target_1, target_2, target_3, target_4]
+    currents: &mut [u16; 4], // [curr_1, curr_2, curr_3, curr_4]
+) {
+    let steps = 120; // 유기적인 움직임을 위해 단계를 더 세분화합니다. [cite: 2026-02-13]
+    
+    let starts = [currents[0] as f32, currents[1] as f32, currents[2] as f32, currents[3] as f32];
+    let diffs = [
+        targets[0] as f32 - starts[0],
+        targets[1] as f32 - starts[1],
+        targets[2] as f32 - starts[2],
+        targets[3] as f32 - starts[3],
+    ];
+
+    println!("🚀 4축 유기적 협업 동작 시작...");
+
+    for i in 1..=steps {
+        let t = i as f32 / steps as f32;
+        // Sine Ease-in-out으로 모든 관절의 가속/감속을 통일
+        let ease = (1.0 - (t * std::f32::consts::PI).cos()) / 2.0;
+
+        let n1 = (starts[0] + diffs[0] * ease) as u16;
+        let n2 = (starts[1] + diffs[1] * ease) as u16;
+        let n3 = (starts[2] + diffs[2] * ease) as u16;
+        let n4 = (starts[3] + diffs[3] * ease) as u16;
+
+        // PCA9685를 통해 거의 동시에 명령 하달
+        pwm.set_channel_on_off(Channel::C1, 0, n1).unwrap();
+        pwm.set_channel_on_off(Channel::C2, 0, n2).unwrap();
+        pwm.set_channel_on_off(Channel::C3, 0, n3).unwrap();
+        pwm.set_channel_on_off(Channel::C4, 0, n4).unwrap();
+
+        // 7.4V 전원의 안정성을 위해 미세 딜레이 조정 [cite: 2026-02-13, 2026-02-23]
+        FreeRtos::delay_ms(15); 
+    }
+
+    // 현재 위치 업데이트
+    for i in 0..4 { currents[i] = targets[i]; }
+    println!("✅ 유기적 이동 완료!");
+}
+
+fn run_apple_spiral_test(
+    pwm: &mut Pca9685<RefCellDevice<'_, I2cDriver<'_>>>,
+    currents: &mut [u16; 4]
+) {
+    println!("🍎 사과 깎기 나선형 궤적 연습 시작!");
+
+    // 나선형 궤적 좌표 설정 [1번 어깨, 2번 팔꿈치, 3번 손목, 4번 회전/그리퍼]
+    // 주의: 실제 기구학적 구조에 따라 각도(Pulse) 값은 조정이 필요합니다. [cite: 2026-02-21]
+    let spiral_path = [
+        [450, 400, 300, 300], // 1단계: 사과 상단 접근
+        [460, 420, 310, 350], // 2단계: 약간 회전하며 하강 시작
+        [470, 440, 320, 400], // 3단계: 중간 지점
+        [480, 460, 330, 450], // 4단계: 하단부 도달
+        [450, 300, 300, 300], // 5단계: 안전하게 후퇴
+    ];
+
+    for (i, target) in spiral_path.iter().enumerate() {
+        println!("📍 궤적 단계 {}: {:?}", i + 1, target);
+        
+        // 단계별 이동: 사과를 깎을 때는 더 천천히 움직이도록 설정 가능 [cite: 2026-02-13]
+        move_4axis_organic(pwm, *target, currents);
+        
+        // 각 단계 사이의 아주 짧은 대기 (연속성을 위해 짧게 설정)
+        FreeRtos::delay_ms(200);
+    }
+
+    println!("✅ 나선형 궤적 연습 완료!");
+}
+
+fn run_full_apple_sequence(
+    pwm: &mut Pca9685<RefCellDevice<'_, I2cDriver<'_>>>,
+    currents: &mut [u16; 4]
+) {
+    println!("🚀 [시퀀스 시작] 사과 깎기 마술을 시작합니다!");
+
+    // 1. 위쪽 Safe Zone으로 이동하여 공간 확보
+    println!("Step 1: 공간 확보 중...");
+    move_4axis_organic(pwm, [550, 300, 300, 300], currents);
+    FreeRtos::delay_ms(1000);
+
+    // 2. 사과 파지 위치로 접근 (그리퍼 열기)
+    println!("Step 2: 사과 접근 및 그리퍼 개방");
+    move_4axis_organic(pwm, [450, 400, 300, 420], currents);
+    FreeRtos::delay_ms(1500);
+
+    // 3. 사과 잡기 (그리퍼 닫기)
+    println!("Step 3: 사과 고정!");
+    move_4axis_organic(pwm, [450, 400, 300, 250], currents); 
+    FreeRtos::delay_ms(2000); // 고정 확인을 위한 충분한 시간
+
+    // 4. 나선형 궤적 (깎기 동작)
+    println!("Step 4: 나선형 깎기 궤적 시작...");
+    let spiral_steps = [
+        [460, 420, 310, 250],
+        [470, 440, 320, 250],
+        [480, 460, 330, 250],
+    ];
+    for target in spiral_steps.iter() {
+        move_4axis_organic(pwm, *target, currents);
+        FreeRtos::delay_ms(300);
+    }
+
+    // 5. 완료 후 안전하게 복귀
+    println!("Step 5: 작업 완료, 원위치 복귀");
+    move_4axis_organic(pwm, [550, 300, 300, 300], currents);
+    
+    println!("✅ [시퀀스 종료] 오늘 테스트 성공적!");
 }
