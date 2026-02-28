@@ -208,15 +208,18 @@ fn main() -> Result<()> {
                     //move_arm_smooth(&mut pwm, *channel, &mut elbow_pos, 100);
                     //move_arm_smooth(&mut pwm, *channel, &mut elbow_pos, 100);
     
-    println!("🔔 1번 어깨 모터 (위쪽 Safe Zone)");
+    //println!("🔔 1번 어깨 모터 (위쪽 Safe Zone)");
                     // 사진의 위치(400)에서 위아래로 살짝만 움직여 부하 최소화
-                    move_arm_smooth(&mut pwm, Channel::C1, &mut shoulder_pos, 360); // 위로 더 들기
-                    FreeRtos::delay_ms(1200);
+     //               move_arm_smooth(&mut pwm, Channel::C1, &mut shoulder_pos, 360); // 위로 더 들기
+     //               FreeRtos::delay_ms(1200);
      /*move_arm_smooth(&mut pwm, Channel::C1, &mut current_pos_shoulder, target_upper);
     println!("#1 위쪽(550)으로 먼저 움직여서 공간 확보");
     FreeRtos::delay_ms(1000);
     */
-    let mut currents = [shoulder_pos, elbow_pos, wrist_pos, 300u16];
+    //let mut currents = [shoulder_pos, elbow_pos, wrist_pos, 300u16];
+
+    // 1. 초기화 부분 (main 함수 상단)
+    let mut currents = [450, 300, 300, 300]; // 550에서 450으로 하향 조정
 
     loop {
         
@@ -391,7 +394,78 @@ fn main() -> Result<()> {
     //run_apple_spiral_test(&mut pwm, &mut currents);
 
     // 사과 깎기 통합 시퀀스 (Full Sequence)
-    run_full_apple_sequence(&mut pwm, &mut currents);
+    //run_full_apple_sequence(&mut pwm, &mut currents);
+
+       //println!("🚀 [1, 2번 집중 테스트] 1단계: 어깨(C1) 가동 범위 확인");
+        // 어깨를 안전한 중립 위치(400)에서 시작
+        //move_arm_smooth(&mut pwm, Channel::C1, &mut currents[0], 400);
+
+       println!("🚀 [2번 모터 실전 테스트] 1번(200) 고정 + 2번 거리 조절");
+
+    // 1단계: 1번을 200으로 먼저 숙이기 (이미 확인된 안전 지점)
+    move_shoulder_safe(&mut pwm, &mut currents[0], 200);
+    FreeRtos::delay_ms(1000);
+
+    // 2단계: 2번 팔꿈치를 서서히 펴기 (300 -> 380 -> 450)
+    // 380: 사과 근처 대기 위치
+    println!("  -> 팔꿈치 380 이동 (접근)");
+    move_arm_smooth(&mut pwm, Channel::C2, &mut currents[1], 380);
+    FreeRtos::delay_ms(1500);
+
+    // 450: 사과 표면 접촉 시도 (이때 칼날 위치를 확인하세요!)
+    println!("  -> 팔꿈치 450 이동 (밀착)");
+    move_arm_smooth(&mut pwm, Channel::C2, &mut currents[1], 450);
+    FreeRtos::delay_ms(2000);
+
+    // 다시 중립 위치로 복귀 (부하 감소)
+    println!("🔄 안전 위치로 복귀");
+    move_arm_smooth(&mut pwm, Channel::C2, &mut currents[1], 300);
+    FreeRtos::delay_ms(2000); 
+
+        // 팔꿈치(2번)만 움직여서 무게 중심 변화를 관찰합니다.
+    /*let elbow_targets = [250, 400];
+    for target in elbow_targets.iter() {
+        println!("  -> 팔꿈치 이동 목표: {}", target);
+        move_arm_smooth(&mut pwm, Channel::C2, &mut currents[1], *target);
+        FreeRtos::delay_ms(1000);
+    }
+
+    // 복합 동작 시에도 어깨를 420 이상 뒤로 보내지 않습니다.
+    println!("🚀 [복합 테스트] 어깨(420) & 팔꿈치(300)");
+    
+      // head는 [index 0], tail은 [index 1, 2, 3]을 가집니다.
+        let (head, tail) = currents.split_at_mut(1);
+
+        move_arms_simultaneous(&mut pwm, 420, 300, &mut head[0], &mut tail[1]);
+        */
+
+        // 사과 접근 시에도 너무 뒤에서 시작하지 않도록 조정
+    //move_shoulder_safe(&mut pwm, &mut currents[0], 320);
+
+        // 2번 팔꿈치(C2)를 고정된 어깨 상태에서 천천히 움직여 봅니다.
+        // RDS3225의 반응성을 보기 위해 스텝을 잘게 쪼갭니다.
+        
+
+        /* 
+        println!("🚀 [1, 2번 집중 테스트] 2단계: 복합 유기적 이동");
+        // 어깨와 팔꿈치가 동시에 움직일 때 전원(7.4V) 안정성 체크 [cite: 2026-02-23]
+        // 1번 상승(500) & 2번 하강(200)
+
+        // head는 [index 0], tail은 [index 1, 2, 3]을 가집니다.
+        let (head, tail) = currents.split_at_mut(1);
+
+        move_arms_simultaneous(&mut pwm, 500, 200, &mut head[0], &mut tail[1]);
+
+        FreeRtos::delay_ms(2000); 
+
+        // 1번 하강(300) & 2번 상승(400)
+        move_arms_simultaneous(&mut pwm, 300, 400, &mut head[0], &mut tail[1]);
+        FreeRtos::delay_ms(2000);
+
+        println!("✅ 한 주기가 완료되었습니다. 모터 발열 상태를 확인하세요.");
+        */
+        FreeRtos::delay_ms(3000);
+
 
     } 
 }
@@ -599,7 +673,7 @@ fn run_full_apple_sequence(
 
     // 1. 위쪽 Safe Zone으로 이동하여 공간 확보
     println!("Step 1: 공간 확보 중...");
-    move_4axis_organic(pwm, [550, 300, 300, 300], currents);
+    move_4axis_organic(pwm, [420, 300, 300, 300], currents);
     FreeRtos::delay_ms(1000);
 
     // 2. 사과 파지 위치로 접근 (그리퍼 열기)
@@ -626,7 +700,34 @@ fn run_full_apple_sequence(
 
     // 5. 완료 후 안전하게 복귀
     println!("Step 5: 작업 완료, 원위치 복귀");
-    move_4axis_organic(pwm, [550, 300, 300, 300], currents);
+    move_4axis_organic(pwm, [420, 300, 300, 300], currents);
     
     println!("✅ [시퀀스 종료] 오늘 테스트 성공적!");
+}
+
+// 1번 모터 전용: 각도 제한 및 더 부드러운 이동
+fn move_shoulder_safe(
+    pwm: &mut Pca9685<RefCellDevice<'_, I2cDriver<'_>>>,
+    current_pos: &mut u16,
+    target_pos: u16,
+) {
+    // [안전 장치] 300~500 사이로 강제 제한 (기구 파손 방지)
+    let safe_target = target_pos.clamp(200, 420); 
+    
+    // 관성을 줄이기 위해 단계를 100으로 대폭 늘림 [cite: 2026-02-13]
+    let steps = 120; 
+    let start = *current_pos as f32;
+    let diff = safe_target as f32 - start;
+
+    for i in 1..=steps {
+        let t = i as f32 / steps as f32;
+        let ease = (1.0 - (t * std::f32::consts::PI).cos()) / 2.0;
+        let next_pos = (start + diff * ease) as u16;
+
+        pwm.set_channel_on_off(Channel::C1, 0, next_pos).unwrap();
+        
+        // RDS3225의 고토크 반동을 억제하기 위한 딜레이 [cite: 2026-02-13, 2026-02-23]
+        FreeRtos::delay_ms(15); 
+    }
+    *current_pos = safe_target;
 }
