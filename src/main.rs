@@ -174,15 +174,16 @@ fn main() -> Result<()> {
     ];
 
     // 1. 루프 시작 전 초기 위치 설정 (위쪽으로 접힌 자세 예시: 400)
-    let mut current_pos_shoulder = 400u16;
+    let mut current_pos_shoulder = 500u16;
 
     // ----------- Motor #1 adjust start -------------------------------------------//
     // 위쪽(450)으로 먼저 움직여서 공간 확보
     //let target_upper = 450; 
     let target_upper = 550; 
-    move_arm_smooth(&mut pwm, Channel::C1, &mut current_pos_shoulder, target_upper);
-    println!("#1 위쪽(550)으로 먼저 움직여서 공간 확보");
-    FreeRtos::delay_ms(1000);
+
+    
+
+   
     
     // 다시 중간(350)으로 복귀
     //move_arm_smooth(&mut pwm, Channel::C1, &mut current_pos_shoulder, 350);
@@ -221,7 +222,40 @@ fn main() -> Result<()> {
     // 1. 초기화 부분 (main 함수 상단)
     let mut currents = [450, 300, 300, 300]; // 550에서 450으로 하향 조정
 
+        // loop 외부 설정
+        let mut shoulder_pos = 450u16; // 1번 (안정권 확인됨)
+        let mut elbow_pos = 300u16;    // 2번 (이제 시작!)
+        let mut current_pos_c3 = 300u16; // 3번 그리퍼 초기값 (중립)
+
     loop {
+
+      println!("🍎 [3축 통합 테스트] 사과 포획 시퀀스 시작!");
+
+    // 1단계: 유기적 접근 (어깨 내리고 팔꿈치 펴기)
+    // C1: 450->300, C2: 300->450
+    println!("  -> Step 1: 접근 중...");
+    move_4axis_organic(&mut pwm, [300, 450, 300, 300], &mut currents);
+    FreeRtos::delay_ms(1500);
+
+    // 2단계: 그리퍼 작동 (사과 잡기)
+    // C3: 300(중립) -> 200(닫힘/잡기)
+    println!("  -> Step 2: 🦀 그리퍼 작동! (사과 고정)");
+    move_arm_smooth(&mut pwm, Channel::C3, &mut currents[2], 200);
+    FreeRtos::delay_ms(1000);
+
+    // 3단계: 미세 하강 (어깨 250까지 밀착)
+    println!("  -> Step 3: 표면 밀착 (C1: 250)");
+    move_arm_smooth(&mut pwm, Channel::C1, &mut currents[0], 250);
+    FreeRtos::delay_ms(1000);
+
+    // 4단계: 안전 복귀 (그리퍼 열고 초기 자세로)
+    println!("  -> Step 4: 그리퍼 해제 및 홈 위치 복귀");
+    move_arm_smooth(&mut pwm, Channel::C3, &mut currents[2], 300); // 그리퍼 열기
+    FreeRtos::delay_ms(500);
+    move_4axis_organic(&mut pwm, [450, 300, 300, 300], &mut currents);
+    
+    println!("✅ 시퀀스 완료! 모터들이 여전히 시원한지 확인해 주세요. ㅋㅋ");
+    FreeRtos::delay_ms(4000); 
         
         /*for (id, name, channel) in channels.iter() {
             println!("🔔 {}번 {} 모터 작동 테스트", id, name);
@@ -356,6 +390,7 @@ fn main() -> Result<()> {
     FreeRtos::delay_ms(3000);
     */
 
+    // -- 2026.03.02 TEST ---
     /* 
     println!("🔔 4번 관절(그리퍼/회전) 테스트 시작");
 
@@ -400,7 +435,7 @@ fn main() -> Result<()> {
         // 어깨를 안전한 중립 위치(400)에서 시작
         //move_arm_smooth(&mut pwm, Channel::C1, &mut currents[0], 400);
 
-       println!("🚀 [2번 모터 실전 테스트] 1번(200) 고정 + 2번 거리 조절");
+       /*println!("🚀 [2번 모터 실전 테스트] 1번(200) 고정 + 2번 거리 조절");
 
     // 1단계: 1번을 200으로 먼저 숙이기 (이미 확인된 안전 지점)
     move_shoulder_safe(&mut pwm, &mut currents[0], 200);
@@ -421,6 +456,7 @@ fn main() -> Result<()> {
     println!("🔄 안전 위치로 복귀");
     move_arm_smooth(&mut pwm, Channel::C2, &mut currents[1], 300);
     FreeRtos::delay_ms(2000); 
+    */
 
         // 팔꿈치(2번)만 움직여서 무게 중심 변화를 관찰합니다.
     /*let elbow_targets = [250, 400];
