@@ -126,6 +126,7 @@ fn main() -> Result<()> {
    println!("🚀 [테스트] I2C를 제외하고 PS2 컨트롤러만 시작합니다...");
 
    // LEDC 설정 (50Hz)
+    /*
     let timer_config = config::TimerConfig::new()
         .frequency(Hertz(50).into())
         .resolution(Resolution::Bits14);
@@ -136,6 +137,7 @@ fn main() -> Result<()> {
         &timer,
         peripherals.pins.gpio15, // ESP32-C6 핀맵 확인 후 수정
     )?;
+    */
 
     let mut current_state = RobotState::Idle;
     let mut current_duty = 1229; // Neutral
@@ -220,7 +222,7 @@ fn main() -> Result<()> {
     //let mut currents = [shoulder_pos, elbow_pos, wrist_pos, 300u16];
 
     // 1. 초기화 부분 (main 함수 상단)
-    let mut currents = [450, 300, 300, 300]; // 550에서 450으로 하향 조정
+    let mut currents = [450, 300, 300, 300, 300]; // 550에서 450으로 하향 조정
 
         // loop 외부 설정
         let mut shoulder_pos = 450u16; // 1번 (안정권 확인됨)
@@ -229,7 +231,89 @@ fn main() -> Result<()> {
 
     loop {
 
-      println!("🍎 [3축 통합 테스트] 사과 포획 시퀀스 시작!");
+        //run_spiral_peeling_sequence(&mut pwm, &mut currents);
+        //run_cool_spiral_sequence(&mut pwm, &mut currents);
+        //run_c5_solo_performance(&mut pwm, &mut currents);
+        run_c5_power_test(&mut pwm, &mut currents);
+        
+        /* 
+        // [마술사 전용] 1번(250) + 2번 고정 시연 시퀀스
+println!("✨ [시연 시작] 1번(250) 황금 지점 고정 모드!");
+
+// 1. 초기 자세: 1번을 250으로, 2번을 300으로 꽉 잡아 고정
+// [C1, C2, C3, C4, C5] 순서 (C3은 사과를 잡은 상태로 가정)
+let mut target_pose = [250, 300, 200, 300, 300]; 
+move_5axis_organic(&mut pwm, target_pose, &mut currents);
+FreeRtos::delay_ms(1500);
+
+// 2. 5번 모터(C5) '진입각' 테스트 (300 -> 500)
+// 1, 2번이 고정되어 있어 5번의 움직임이 아주 잘 보일 겁니다.
+println!("  -> 5번 모터(C5) 각도 크게 변화 중... (300 to 500)");
+target_pose[4] = 500;
+move_5axis_organic(&mut pwm, target_pose, &mut currents);
+FreeRtos::delay_ms(1000);
+
+// 3. 4번(회전)하며 5번(보정)하는 '실전 깎기' 시뮬레이션
+for i in 0..5 {
+    let next_c4 = 250 + (i * 50); // 250, 300, 350, 400, 450
+    let next_c5 = 500 - (i * 40); // 500, 460, 420, 380, 340 (변화폭 확대)
+    
+    println!("  -> [동작] C4(회전): {}, C5(각도보정): {}", next_c4, next_c5);
+    move_5axis_organic(&mut pwm, [250, 300, 200, next_c4, next_c5], &mut currents);
+    FreeRtos::delay_ms(300);
+}
+
+// 4. 안전하게 복귀
+println!("✅ 시연 완료! 기둥(1,2번)의 안정성을 확인하세요.");
+move_5axis_organic(&mut pwm, [250, 300, 300, 300, 300], &mut currents);
+*/
+
+        //run_vertical_magic_sequence(&mut pwm, &mut currents);
+        //run_fixed_pillar_sequence(&mut pwm, &mut currents);
+
+        /* 
+        // [긴급 진단] 1번 모터(C1)가 신호를 받는지 확인하는 코드
+        println!("📢 1번 모터 강제 기상 테스트 시작!");
+
+        // 1. 1번 모터만 '눕히기' (값: 250)
+        println!("  -> 1번: 250으로 이동 (눕히기)");
+        move_arm_smooth(&mut pwm, Channel::C1, &mut currents[0], 250);
+        FreeRtos::delay_ms(2000); // 충분히 관찰할 시간
+
+        // 2. 1번 모터만 '세우기' (값: 500)
+        println!("  -> 1번: 500으로 이동 (세우기)");
+        move_arm_smooth(&mut pwm, Channel::C1, &mut currents[0], 500);
+        FreeRtos::delay_ms(2000);
+
+        // 3. 1번 모터 '중립' (값: 375)
+        println!("  -> 1번: 375로 복귀 (중립)");
+        move_arm_smooth(&mut pwm, Channel::C1, &mut currents[0], 375);
+        FreeRtos::delay_ms(1000);
+
+        println!("✅ 1번이 움직였나요? 안 움직였다면 선을 바꿔 꽂아야 합니다!");
+        */
+
+        /* 
+println!("✨ [마술 시연] 사과 깎기 5축 통합 모드 시작!");
+
+// 초기 위치 (C1~C5)
+let mut currents = [450, 300, 300, 300, 300]; 
+
+// 1. 접근: 어깨 내리고 손목 세우기
+move_5axis_organic(&mut pwm, [300, 450, 200, 300, 400], &mut currents);
+FreeRtos::delay_ms(1000);
+
+// 2. 절삭 각도 조절: 5번 모터(C5)를 400 -> 350으로 조절하여 칼날 진입
+println!("  -> 칼날 각도 조정 중...");
+move_arm_smooth(&mut pwm, Channel::C5, &mut currents[4], 350); 
+FreeRtos::delay_ms(500);
+
+// 3. 회전하며 하강 (유기적 동작의 핵심)
+move_5axis_organic(&mut pwm, [350, 480, 200, 450, 320], &mut currents);
+println!("✅ 시연 완료! 장치가 뜨거워지지 않았는지 확인해 보세요.");
+*/
+
+      /*println!("🍎 [3축 통합 테스트] 사과 포획 시퀀스 시작!");
 
     // 1단계: 유기적 접근 (어깨 내리고 팔꿈치 펴기)
     // C1: 450->300, C2: 300->450
@@ -256,6 +340,7 @@ fn main() -> Result<()> {
     
     println!("✅ 시퀀스 완료! 모터들이 여전히 시원한지 확인해 주세요. ㅋㅋ");
     FreeRtos::delay_ms(4000); 
+    */
         
         /*for (id, name, channel) in channels.iter() {
             println!("🔔 {}번 {} 모터 작동 테스트", id, name);
@@ -766,4 +851,237 @@ fn move_shoulder_safe(
         FreeRtos::delay_ms(15); 
     }
     *current_pos = safe_target;
+}
+
+// 5축 유기적 제어 함수로 업그레이드
+// [안정성 & 정밀도] 1~5번 관절 통합 시연 제어
+fn move_5axis_organic(
+    pwm: &mut Pca9685<RefCellDevice<'_, I2cDriver<'_>>>,
+    targets: [u16; 5],      
+    currents: &mut [u16; 5], 
+) {
+    let steps = 150; // 5축이 동시에 움직이므로 단계를 더 세분화 (부하 분산) [cite: 2026-02-13]
+    
+    let starts = [
+        currents[0] as f32, currents[1] as f32, 
+        currents[2] as f32, currents[3] as f32,
+        currents[4] as f32
+    ];
+    let diffs = [
+        targets[0] as f32 - starts[0],
+        targets[1] as f32 - starts[1],
+        targets[2] as f32 - starts[2],
+        targets[3] as f32 - starts[3],
+        targets[4] as f32 - starts[4],
+    ];
+
+    for i in 1..=steps {
+        let t = i as f32 / steps as f32;
+        let ease = (1.0 - (t * std::f32::consts::PI).cos()) / 2.0;
+
+        // PCA9685 각 채널에 부드러운 펄스 전송
+        pwm.set_channel_on_off(Channel::C1, 0, (starts[0] + diffs[0] * ease) as u16).unwrap();
+        pwm.set_channel_on_off(Channel::C2, 0, (starts[1] + diffs[1] * ease) as u16).unwrap();
+        pwm.set_channel_on_off(Channel::C3, 0, (starts[2] + diffs[2] * ease) as u16).unwrap();
+        pwm.set_channel_on_off(Channel::C4, 0, (starts[3] + diffs[3] * ease) as u16).unwrap();
+        pwm.set_channel_on_off(Channel::C5, 0, (starts[4] + diffs[4] * ease) as u16).unwrap();
+
+        FreeRtos::delay_ms(15); // RDS3225의 안정적인 반응을 유도 [cite: 2026-02-23]
+    }
+
+    for i in 0..5 { currents[i] = targets[i]; }
+}
+
+// 1번 모터를 수직으로 고정하고 2~5번을 유기적으로 움직이는 마술 시퀀스
+fn run_vertical_magic_sequence(
+    pwm: &mut Pca9685<RefCellDevice<'_, I2cDriver<'_>>>,
+    currents: &mut [u16; 5]
+) {
+    println!("✨ [직립 시연] 1번 모터 Vertical 고정 및 5축 협업 시작!");
+
+    // 1. 준비 자세: 1번을 수직(480)으로 세우고 모든 관절 정렬
+    // [C1, C2, C3, C4, C5] -> [직립, 접기, 중립, 정면, 수평]
+    move_5axis_organic(pwm, [480, 250, 300, 300, 300], currents);
+    FreeRtos::delay_ms(2000);
+
+    // 2. 접근 및 5번 모터 강조: 5번(칼날 각도)을 크게 움직여 확인
+    println!("  -> 5번 모터(C5) 각도 가시성 테스트 (300 -> 450)");
+    move_5axis_organic(pwm, [480, 350, 200, 300, 450], currents);
+    FreeRtos::delay_ms(1000);
+
+    // 3. 나선형 회전 시뮬레이션 (4번 회전 + 5번 보정)
+    for pos in (300..=450).step_by(50) {
+        println!("  -> 회전(C4): {}, 각도보정(C5): {}", pos, 450 - (pos/10));
+        move_5axis_organic(pwm, [480, 380, 200, pos, 450 - (pos/10)], currents);
+        FreeRtos::delay_ms(500);
+    }
+
+    // 4. 안전 복귀
+    println!("  -> 시연 종료 및 홈 위치 복귀");
+    move_5axis_organic(pwm, [480, 250, 300, 300, 300], currents);
+}
+
+fn run_fixed_pillar_sequence(
+    pwm: &mut Pca9685<RefCellDevice<'_, I2cDriver<'_>>>,
+    currents: &mut [u16; 5]
+) {
+    println!("🚀 [고정 시연] 1, 2번 기둥 모드! (안정성 극대화)");
+
+    // 1. 기둥 세우기 (1번: 480, 2번: 200 정도로 바짝 세움)
+    // C1: 480(어깨), C2: 200(팔꿈치), C3: 300, C4: 300, C5: 300
+    move_5axis_organic(pwm, [480, 200, 300, 300, 300], currents);
+    FreeRtos::delay_ms(1500);
+
+    // 2. 5번 모터 "생존 확인" 및 진입각 조절 (300 -> 450)
+    // 1, 2번이 고정되어 있으므로 5번의 움직임이 훨씬 잘 보일 겁니다.
+    println!("  -> 5번 모터(C5) 진입각 크게 조정 중...");
+    move_5axis_organic(pwm, [480, 200, 300, 300, 450], currents);
+    FreeRtos::delay_ms(1000);
+
+    // 3. 4번(회전) 시연: 기둥은 고정된 채 손목만 뱅글뱅글
+    for pos in (250..=450).step_by(40) {
+        // 5번(C5)도 4번의 위치에 따라 연동하여 크게 움직이도록 설정
+        let c5_target = 450 - (pos / 4); // 변화폭을 더 키웠습니다!
+        println!("  -> [고정상태] 4번 회전: {}, 5번 틸트: {}", pos, c5_target);
+        
+        move_5axis_organic(pwm, [480, 200, 300, pos, c5_target as u16], currents);
+        FreeRtos::delay_ms(400);
+    }
+
+    println!("✅ 고정 시연 완료! 1, 2번이 버텨주니 훨씬 안정적이네요. ㅋㅋ");
+}
+
+fn run_perfect_stable_sequence(
+    pwm: &mut Pca9685<RefCellDevice<'_, I2cDriver<'_>>>,
+    currents: &mut [u16; 5]
+) {
+    println!("✨ [마술사 전용 모드] 1번(250) 고정! 안정성 극대화 시연 시작");
+
+    // 1. 황금 밸런스 자세 잡기
+    // C1: 250(마술사님의 Pick!), C2: 300(안정적인 수직), C3: 300(그리퍼 중립)
+    move_5axis_organic(pwm, [250, 300, 300, 300, 300], currents);
+    FreeRtos::delay_ms(1500);
+
+    // 2. 5번 모터(C5)의 화려한 등장 (변화폭 확대)
+    // 1번이 250으로 단단히 버텨주니 5번을 더 역동적으로 움직여도 됩니다.
+    println!("  -> 5번 모터 정밀 각도 가동 (300 -> 500)");
+    move_5axis_organic(pwm, [250, 300, 300, 300, 500], currents);
+    FreeRtos::delay_ms(1000);
+
+    // 3. 4번(회전)과 5번(보정)의 콤비네이션 깎기 시연
+    for pos in (200..=500).step_by(60) {
+        // 4번 회전에 맞춰 5번도 춤추듯 움직이게 설정
+        let c5_dynamic = 500 - (pos / 2); 
+        println!("  -> [안정모드] 4번 회전: {}, 5번 보정: {}", pos, c5_dynamic);
+        
+        move_5axis_organic(pwm, [250, 300, 300, pos, c5_dynamic as u16], currents);
+        FreeRtos::delay_ms(300); // 1번이 안정적이니 딜레이를 살짝 줄여 리드미컬하게!
+    }
+
+    // 4. 안전한 마무리
+    move_5axis_organic(pwm, [250, 300, 300, 300, 300], currents);
+    println!("✅ 250 지점에서 시연 완료! 확실히 소음과 진동이 줄어들었죠? ㅋㅋ");
+}
+
+fn run_spiral_peeling_sequence(
+    pwm: &mut Pca9685<RefCellDevice<'_, I2cDriver<'_>>>,
+    currents: &mut [u16; 5]
+) {
+    println!("🌀 [실전 마법] 나선형 하강 깎기 시작!");
+
+    // 시작 위치: 1번(250), 2번(250) - 사과 꼭대기
+    move_5axis_organic(pwm, [250, 250, 200, 250, 480], currents);
+    FreeRtos::delay_ms(1000);
+
+    // 나선형 궤적 (5단계로 나누어 하강)
+    for i in 0..6 {
+        let down_step = 250 + (i * 20);   // 2번(팔꿈치)을 조금씩 내려 하강
+        let rotate_step = 250 + (i * 40); // 4번(손목) 회전
+        let angle_fix = 480 - (i * 25);   // 5번(칼날) 곡률에 맞춰 각도 보정
+
+        println!("  -> 하강: {}, 회전: {}, 각도: {}", down_step, rotate_step, angle_fix);
+        
+        // 1번(250)은 절대 고정! (우리의 약속)
+        move_5axis_organic(pwm, [250, down_step, 200, rotate_step, angle_fix], currents);
+        FreeRtos::delay_ms(400);
+    }
+
+    println!("✅ 나선형 시연 종료! 모양이 좀 나오나요? ㅋㅋ");
+}
+
+fn run_cool_spiral_sequence(
+    pwm: &mut Pca9685<RefCellDevice<'_, I2cDriver<'_>>>,
+    currents: &mut [u16; 5]
+) {
+    println!("❄️ [쿨링 모드] 4번 모터 부하를 줄이며 나선형 깎기 시작!");
+
+    let mut current_pose = [250, 250, 200, 250, 480];
+    move_5axis_organic(pwm, current_pose, currents);
+    FreeRtos::delay_ms(1000);
+
+    // 단계를 8단계로 더 쪼개서 각 단계의 회전폭을 줄입니다.
+    for step in 1..=8 {
+        let next_c2 = 250 + (step * 15);   // 하강폭 조절
+        let next_c4 = 250 + (step * 30);   // 회전폭 축소 (열 발생 억제)
+        let next_c5 = 480 - (step * 20);   // 각도보정
+
+        move_5axis_organic(pwm, [250, next_c2, 200, next_c4, next_c5], currents);
+        
+        // 4번 모터가 위치를 잡고 잠시 숨을 고를 시간을 줍니다.
+        FreeRtos::delay_ms(550); // 400ms -> 550ms로 소폭 증가
+    }
+
+    println!("✅ 시연 완료! 4번 모터를 만져보세요. 조금 더 시원해졌나요? ㅋㅋ");
+    move_5axis_organic(pwm, [250, 250, 300, 300, 300], currents);
+}
+
+fn run_c5_solo_performance(
+    pwm: &mut Pca9685<RefCellDevice<'_, I2cDriver<'_>>>,
+    currents: &mut [u16; 5]
+) {
+    println!("✨ [마지막 테스트] 5번 모터(C5) 단독 틸트 시연!");
+
+    // 1. 모든 축 고정 (1번은 당연히 250!)
+    // [C1:250, C2:300, C3:300, C4:350, C5:300]
+    let base_pose = [250, 300, 300, 350, 300];
+    move_5axis_organic(pwm, base_pose, currents);
+    FreeRtos::delay_ms(1000);
+
+    // 2. 5번 모터만 왕복 (300 -> 550 -> 300)
+    for target_c5 in (300..=550).step_by(25) {
+        println!("  -> 5번 각도 조절 중: {}", target_c5);
+        move_5axis_organic(pwm, [250, 300, 300, 350, target_c5], currents);
+        FreeRtos::delay_ms(200);
+    }
+
+    for target_c5 in (300..=550).rev().step_by(25) {
+        println!("  -> 5번 원위치 복귀 중: {}", target_c5);
+        move_5axis_organic(pwm, [250, 300, 300, 350, target_c5], currents);
+        FreeRtos::delay_ms(200);
+    }
+
+    println!("✅ 5번 모터 단독 시연 완료! 이제 모든 마법 준비가 끝났습니다. ㅋㅋ");
+}
+fn run_c5_power_test(
+    pwm: &mut Pca9685<RefCellDevice<'_, I2cDriver<'_>>>,
+    currents: &mut [u16; 5]
+) {
+    println!("⚡ [파워 테스트] 5번 모터(C5) 출력 강화 시연!");
+
+    // 1번(250)과 다른 축들은 '최소 유지' 전력으로 고정
+    let standby_pose = [250, 300, 300, 350, 300];
+    move_5axis_organic(pwm, standby_pose, currents);
+    FreeRtos::delay_ms(1000);
+
+    // 5번 모터의 가동 범위를 '공격적'으로 확장 (200 -> 550)
+    // 단계별 이동 폭을 키워(50단위) 더 역동적으로 움직이게 합니다.
+    for target_c5 in (200..=550).step_by(50) {
+        println!("  -> 5번 파워 가동: {}", target_c5);
+        move_5axis_organic(pwm, [250, 300, 300, 350, target_c5], currents);
+        
+        // 너무 느리면 힘이 없어 보일 수 있으니 딜레이를 살짝 줄입니다.
+        FreeRtos::delay_ms(250); 
+    }
+
+    println!("✅ 5번 파워 테스트 종료! 이제 좀 힘차게 움직이나요? ㅋㅋ");
 }
