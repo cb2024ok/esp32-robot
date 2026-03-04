@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::f32::consts::PI;
 use std::marker::PhantomData;
+use std::time::Duration;
 
 use embedded_hal::delay;
 use embedded_hal::i2c::I2c;
@@ -17,6 +18,9 @@ use esp_idf_sys::COLL_WEIGHTS_MAX;
 //use pwm_pca9685::{Address, Pca9685,Channel};
 use pwm_pca9685::*;
 use esp_idf_hal::ledc::*;
+// 자유의 날개 프로젝트 실시
+use esp32_nimble::{uuid128, BLEAdvertisementData, BLEDevice, NimbleProperties};
+
 
 const TICK_PERIOD_MS: u32 = 1;
 
@@ -35,6 +39,10 @@ const MAX_ANGLE: f32 = 180.0;
 const STEPS: usize = 60; // 궤적 분할 수 (안정적인 이동을 위해 설정)
 const SERVO_MIN: u16 = 150; // RDS3225 최소 펄스
 const SERVO_MAX: u16 = 600; // RDS3225 최대 펄스
+
+const GRIPPER_OPEN: u32 = 480;  // 시원하게 열기
+const GRIPPER_CLOSE: u32 = 185; // 안정적으로 닫기
+const GRIPPER_IDLE: u32 = 300;  // 기본 자세
 
 pub struct RobotArmController {
     pub master_id: usize,        // 현재 선택된 모터 번호 (0~5)
@@ -145,26 +153,27 @@ fn main() -> Result<()> {
     println!("자동 제어 시스템 시작...");
 
     // --- I2C 및 PCA9685 로직 일시 중단 ---
-    let config = I2cConfig::new().baudrate(Hertz(100_000));
+    /*let config = I2cConfig::new().baudrate(Hertz(100_000));
     let mut i2c = I2cDriver::new(
         peripherals.i2c0,
         peripherals.pins.gpio21,
         peripherals.pins.gpio22,
         &config,
     )?;
+    */
 
     // 1. I2C 드라이버를 RefCell로 감쌉니다.
-    let i2c_ref_cell = RefCell::new(i2c);
+    //let i2c_ref_cell = RefCell::new(i2c);
 
     // 2. PCA9685용 가상 I2C 핸들을 만듭니다. (소유권 문제 해결)
-    let pwm_i2c =  RefCellDevice::new(&i2c_ref_cell);// i2c_bus.acquire_i2c();
+    //let pwm_i2c =  RefCellDevice::new(&i2c_ref_cell);// i2c_bus.acquire_i2c();
 
-    let mut pwm = Pca9685::new(pwm_i2c, Address::from(0x60))
-     .map_err(|_| anyhow::anyhow!("PCA9685 초기화 실패"))?;
+    //let mut pwm = Pca9685::new(pwm_i2c, Address::from(0x60))
+    // .map_err(|_| anyhow::anyhow!("PCA9685 초기화 실패"))?;
     
-    pwm.set_prescale(121).unwrap();
-    pwm.enable().unwrap();
-    println!("✅ 모터 드라이버(PCA9685) 연결 성공!");
+    //pwm.set_prescale(121).unwrap();
+    //pwm.enable().unwrap();
+    //println!("✅ 모터 드라이버(PCA9685) 연결 성공!");
     //--------------------------------------- 
 
     // 테스트할 채널 목록 (0번부터 5번까지)
@@ -204,7 +213,7 @@ fn main() -> Result<()> {
     let mut base_pos = 300u16;
     let mut wrist_pos = 300u16;
 
-    println!("=== 관절로봇 테스트 시작 ===");
+    //println!("=== 관절로봇 테스트 시작 ===");
 
      //println!("🔔 2번 팔꿈치 모터 - 180...");
     //                move_arm_smooth(&mut pwm, Channel::C2, &mut elbow_pos, 180);
@@ -228,13 +237,68 @@ fn main() -> Result<()> {
         let mut shoulder_pos = 450u16; // 1번 (안정권 확인됨)
         let mut elbow_pos = 300u16;    // 2번 (이제 시작!)
         let mut current_pos_c3 = 300u16; // 3번 그리퍼 초기값 (중립)
+        let mut input_target = 0u32 ;
+        let mut current_angle = 300u32;
+
+          // BLE Device init
+    let ble_device = BLEDevice::take();
+    let server = ble_device.get_server();
+
+    // for connection..
+    server.on_connect(|_server, desc| {
+        println!("BLE -- iPhone F-22 연결됨!: {:?}", desc);
+    });
+
+    // 서비스 생성
+    let service = server.create_service(uuid128!("fafafafa-abcd-4321-abcd-fafafafafafa"));
+
+    // 3. 특성
+    let control_characteristic = service.lock().create_characteristic(
+        uuid128!("12345678-1234-5678-1234-567812345678"),
+        NimbleProperties::WRITE | NimbleProperties::READ,
+    );
+
+    // 데이터 수신시 콜백
+    control_characteristic.lock().on_write(move |args| {
+        let data = args.recv_data();
+        println!("BLE DATA-> {:?}",data);
+    });
+
+    // 광고시작
+    let advertising = ble_device.get_advertising();
+
+    let mut ad_data: BLEAdvertisementData = BLEAdvertisementData::new();
+    ad_data.name("Magician_Su57_P4");
+    advertising.lock().set_data(&mut ad_data).unwrap();
+
+    advertising.lock().start().unwrap();
+    log::info!("BLE 광고중... ipHone에서 연결을 기다림..!");
 
     loop {
 
         //run_spiral_peeling_sequence(&mut pwm, &mut currents);
         //run_cool_spiral_sequence(&mut pwm, &mut currents);
         //run_c5_solo_performance(&mut pwm, &mut currents);
-        run_c5_power_test(&mut pwm, &mut currents);
+        // RDS3225의 안전 범위를 170~550으로 제한하는 예시
+        // 1. 처음 시작할 때
+        /* 
+        let mut current_angle: u32 = 300; // 초기 구동 위치 (중립)
+
+        // 2. 대기 모드로 이동시키고 싶을 때
+        let input_target = GRIPPER_IDLE; // GRIPPER_IDLE을 300~350 정도로 설정
+
+        // 3. 안전 범위 체크 후 이동
+        let safe_target = input_target.clamp(GRIPPER_CLOSE, GRIPPER_OPEN);
+            run_c5_power_test(&mut pwm,&mut current_angle, safe_target);
+
+        // 테스트용: 180과 480을 왔다갔다 하게 강제 할당
+        let test_target = if current_angle < 300 { 480 } else { 180 };
+    
+        let safe_target = test_target.clamp(GRIPPER_CLOSE, GRIPPER_OPEN);
+        run_c5_power_test(&mut pwm, &mut current_angle, safe_target);
+       */
+    // 한 번 동작 후 잠시 대기
+    FreeRtos::delay_ms(1000);
         
         /* 
         // [마술사 전용] 1번(250) + 2번 고정 시연 시퀀스
@@ -1062,7 +1126,8 @@ fn run_c5_solo_performance(
 
     println!("✅ 5번 모터 단독 시연 완료! 이제 모든 마법 준비가 끝났습니다. ㅋㅋ");
 }
-fn run_c5_power_test(
+
+/*fn run_c5_power_test(
     pwm: &mut Pca9685<RefCellDevice<'_, I2cDriver<'_>>>,
     currents: &mut [u16; 5]
 ) {
@@ -1071,6 +1136,7 @@ fn run_c5_power_test(
     // 1번(250)과 다른 축들은 '최소 유지' 전력으로 고정
     let standby_pose = [250, 300, 300, 350, 300];
     move_5axis_organic(pwm, standby_pose, currents);
+    //move_smoothly(standby_pose, target_angle);
     FreeRtos::delay_ms(1000);
 
     // 5번 모터의 가동 범위를 '공격적'으로 확장 (200 -> 550)
@@ -1084,4 +1150,44 @@ fn run_c5_power_test(
     }
 
     println!("✅ 5번 파워 테스트 종료! 이제 좀 힘차게 움직이나요? ㅋㅋ");
+}
+*/
+
+// 간단한 서보 이동 부드럽게 만들기 예시 (의사 코드)
+/*fn move_smoothly(current_angle: u32, target_angle: u32) {
+    let step = 1; // 1도씩 이동
+    let delay_ms = 15; // 이동 간격
+
+    if current_angle < target_angle {
+        for angle in current_angle..=target_angle {
+            set_servo_pwm(angle);
+            sleep_ms(delay_ms);
+        }
+    } else {
+        for angle in (target_angle..=current_angle).rev() {
+            set_servo_pwm(angle);
+            sleep_ms(delay_ms);
+        }
+    }
+}
+*/
+
+fn run_c5_power_test(pwm: &mut Pca9685<RefCellDevice<'_, I2cDriver<'_>>>, current_angle: &mut u32, target_angle: u32) {
+    let step_delay = Duration::from_millis(20); // 안정성을 위해 20ms 간격
+    
+    while *current_angle != target_angle {
+        if *current_angle < target_angle {
+            *current_angle += 1;
+        } else {
+            *current_angle -= 1;
+        }
+        
+        // 서보에 PWM 신호 전송
+        //set_servo_pwm(*current_angle); 
+        pwm.set_channel_on_off(Channel::C5, 0, *current_angle as u16).unwrap();
+        //move_5axis_organic(pwm, [250, 300, 300, 350, target_c5], currents);
+        
+        // 속도보다 '안정성'을 택한 딜레이
+        FreeRtos::delay_ms(step_delay.as_millis() as u32);
+    }
 }
