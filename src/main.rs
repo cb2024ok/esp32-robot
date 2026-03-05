@@ -260,8 +260,19 @@ fn main() -> Result<()> {
 
     // 데이터 수신시 콜백
     control_characteristic.lock().on_write(move |args| {
-        let data = args.recv_data();
-        println!("BLE DATA-> {:?}",data);
+        let packet = args.recv_data();
+        //println!("BLE DATA-> {:?}",data);
+        if packet.len() >= 5 && packet[0] == 0xAA {
+            let motor_id = packet[1];
+            let x_angle = packet[2];
+            let y_angle = packet[3];
+            let checksum = packet[4];
+            
+            println!("🚀 [TA System] Received: ID={}, X={}, Y={}, CS={}", 
+                    motor_id, x_angle, y_angle, checksum);
+            
+            // 여기에 서보 PWM 제어 로직 연결
+            }
     });
 
     // 광고시작
