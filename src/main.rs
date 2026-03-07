@@ -1,6 +1,8 @@
 use std::cell::RefCell;
 use std::f32::consts::PI;
 use std::marker::PhantomData;
+use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 
 use embedded_hal::delay;
@@ -15,11 +17,14 @@ use anyhow::Result;
 use esp_idf_hal::units::Hertz;
 use esp_idf_svc::http::status::OK;
 use esp_idf_sys::COLL_WEIGHTS_MAX;
+use esp32_nimble::utilities::mutex::Mutex;
 //use pwm_pca9685::{Address, Pca9685,Channel};
 use pwm_pca9685::*;
 use esp_idf_hal::ledc::*;
 // 자유의 날개 프로젝트 실시
 use esp32_nimble::{uuid128, BLEAdvertisementData, BLEDevice, NimbleProperties};
+
+
 
 
 const TICK_PERIOD_MS: u32 = 1;
@@ -127,6 +132,10 @@ impl<I2C> RobotArm3Axis<I2C>  where I2C: embedded_hal::i2c::I2c  {
     }
 }
 
+fn angle_to_pulse(angle: f32) -> u16 {
+        (SERVO_MIN as f32 + (angle / 180.0) * (SERVO_MAX - SERVO_MIN) as f32) as u16
+    }
+
 fn main() -> Result<()> {
     esp_idf_svc::sys::link_patches();
     let peripherals = Peripherals::take()?;
@@ -153,27 +162,47 @@ fn main() -> Result<()> {
     println!("자동 제어 시스템 시작...");
 
     // --- I2C 및 PCA9685 로직 일시 중단 ---
-    /*let config = I2cConfig::new().baudrate(Hertz(100_000));
+    let config = I2cConfig::new().baudrate(Hertz(100_000));
     let mut i2c = I2cDriver::new(
         peripherals.i2c0,
         peripherals.pins.gpio21,
         peripherals.pins.gpio22,
         &config,
     )?;
-    */
 
     // 1. I2C 드라이버를 RefCell로 감쌉니다.
-    //let i2c_ref_cell = RefCell::new(i2c);
+    //let i2c_ref_cell =  RefCell::new(i2c);
+    //let i2c_device = RefCellDevice::new(&i2c_ref_cell);
+    //let i2c_clone = Arc::clone(&i2c_ref_cell); //i2c_ref_cell.clone();
+
+    //let mut i2c_driver = i2c_clone.lock();
+    //let mut i2c_driver = i2c_clone.lock();
+
+    //let i2c_bus = shared_bus::BusManagerSimple::new(i2c);
+    //let i2c_device = i2c_bus.acquire_i2c(); 
+
+    //let i2c = Arc::new(Mutex::new(i2c));
+    //let i2c_clone = i2c.clone();
+
+    //let mut i2c_guard = i2c_clone.lock();
+    //let pwm = Pca9685::new(i2c, SlaveAddr::default());
+    //let mut pwm = pwm;
+    //pwm.set_prescale(100).unwrap(); // ~60Hz for servos
+    //pwm.enable().unwrap();
+    
 
     // 2. PCA9685용 가상 I2C 핸들을 만듭니다. (소유권 문제 해결)
     //let pwm_i2c =  RefCellDevice::new(&i2c_ref_cell);// i2c_bus.acquire_i2c();
 
+    let mut pwm = Pca9685::new(i2c, Address::from(0x60))
     //let mut pwm = Pca9685::new(pwm_i2c, Address::from(0x60))
-    // .map_err(|_| anyhow::anyhow!("PCA9685 초기화 실패"))?;
+     .map_err(|_| anyhow::anyhow!("PCA9685 초기화 실패"))?;
     
-    //pwm.set_prescale(121).unwrap();
-    //pwm.enable().unwrap();
-    //println!("✅ 모터 드라이버(PCA9685) 연결 성공!");
+    pwm.set_prescale(121).unwrap();
+    pwm.enable().unwrap();
+
+    let shared_pwm = Arc::new(Mutex::new(pwm));
+    println!("✅ 모터 드라이버(PCA9685) 연결 성공!");
     //--------------------------------------- 
 
     // 테스트할 채널 목록 (0번부터 5번까지)
@@ -258,6 +287,8 @@ fn main() -> Result<()> {
         NimbleProperties::WRITE | NimbleProperties::READ,
     );
 
+    let pwm_clone = Arc::clone(&shared_pwm);
+
     // 데이터 수신시 콜백
     control_characteristic.lock().on_write(move |args| {
         let packet = args.recv_data();
@@ -272,6 +303,15 @@ fn main() -> Result<()> {
                     motor_id, x_angle, y_angle, checksum);
             
             // 여기에 서보 PWM 제어 로직 연결
+                
+                // PCA9685 채널 0 모터 제어로직 연결
+                let pulse = angle_to_pulse(x_angle as f32);
+                let channels = [Channel::C0, Channel::C1, Channel::C2];
+                
+                let mut pwm = pwm_clone.lock();
+                
+                pwm.set_channel_on_off(Channel::C0, 0, pulse).unwrap();
+                FreeRtos::delay_ms(10); // 안정성을 위해 조금씩 이동 [cite: 2026-02-13]
             }
     });
 
