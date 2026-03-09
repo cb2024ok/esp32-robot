@@ -305,13 +305,41 @@ fn main() -> Result<()> {
             // 여기에 서보 PWM 제어 로직 연결
                 
                 // PCA9685 채널 0 모터 제어로직 연결
-                let pulse = angle_to_pulse(x_angle as f32);
-                let channels = [Channel::C0, Channel::C1, Channel::C2];
+                // 1번 모터(Y축)에 대한 정밀 보정
+                let pulse: u16 = if motor_id == 0 || motor_id >= 4 {
+                    angle_to_pulse(x_angle as f32)
+                } else {
+                    // 255를 초과하는 400도 제어를 위해 스케일링 적용
+                    let y_scaled = (y_angle as f32 / 255.0) * 400.0;
+                    angle_to_pulse(y_scaled)
+                };
                 
-                let mut pwm = pwm_clone.lock();
+                //let pulse = angle_to_pulse(x_angle as f32);
+                //let channels = [Channel::C0, Channel::C1, Channel::C2];
                 
-                pwm.set_channel_on_off(Channel::C0, 0, pulse).unwrap();
-                FreeRtos::delay_ms(10); // 안정성을 위해 조금씩 이동 [cite: 2026-02-13]
+                //let mut pwm = pwm_clone.lock();
+                // 2. ID에 따른 PCA9685 채널 결정
+                let target_channel = match motor_id {
+                    0 => Some(Channel::C0),
+                    1 => Some(Channel::C1),
+                    2 => Some(Channel::C2),
+                    _ => {
+                        println!("⚠️ 경고: 정의되지 않은 모터 ID: {}", motor_id);
+                        None
+                    }
+                };
+
+                // 3. 해당 채널이 있을 때만 구동
+                if let Some(channel) = target_channel {
+                    let mut pwm = pwm_clone.lock();
+                    pwm.set_channel_on_off(channel, 0, pulse).unwrap();
+                    
+                    // 안정성 확보를 위한 지연 (기존 철학 유지)
+                    FreeRtos::delay_ms(10); 
+                }
+                
+                //pwm.set_channel_on_off(Channel::C0, 0, pulse).unwrap();
+                //FreeRtos::delay_ms(10); // 안정성을 위해 조금씩 이동 [cite: 2026-02-13]
             }
     });
 
