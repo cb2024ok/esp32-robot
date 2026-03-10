@@ -49,6 +49,11 @@ const GRIPPER_OPEN: u32 = 480;  // 시원하게 열기
 const GRIPPER_CLOSE: u32 = 185; // 안정적으로 닫기
 const GRIPPER_IDLE: u32 = 300;  // 기본 자세
 
+// 1. 설계 상수 정의 (마술사님의 관찰 데이터 기반)
+const PHYSICAL_MIN: f32 = 175.0; // 물리적 절대 하한선
+const PHYSICAL_MAX: f32 = 597.0; // 물리적 절대 상한선
+const SAFE_WORK_MIN: f32 = 317.0; // 우리가 정한 작업 하한선 (Y=57 기준)
+
 pub struct RobotArmController {
     pub master_id: usize,        // 현재 선택된 모터 번호 (0~5)
     pub angles: [f32; 6],        // 각 모터의 현재 각도 저장
@@ -310,13 +315,16 @@ fn main() -> Result<()> {
                     angle_to_pulse(x_angle as f32)
                 } else {
                     // 255를 초과하는 400도 제어를 위해 스케일링 적용
-                    let y_scaled = (y_angle as f32 / 255.0) * 400.0;
+                    //let y_scaled = (y_angle as f32 / 255.0) * 400.0;
+                    //let y_scaled = y_angle as f32 + 10.0f32;
+                    let y_scaled = calculate_pulse(y_angle.into()) as f32; //y_angle as f32 + 10.0f32;
                     angle_to_pulse(y_scaled)
                 };
                 
                 //let pulse = angle_to_pulse(x_angle as f32);
                 //let channels = [Channel::C0, Channel::C1, Channel::C2];
-                
+
+                println!("calc pulse value: {}",pulse); 
                 //let mut pwm = pwm_clone.lock();
                 // 2. ID에 따른 PCA9685 채널 결정
                 let target_channel = match motor_id {
@@ -747,6 +755,37 @@ fn move_to_target(driver: &mut LedcDriver, current: &mut u32, target: u32) -> an
     }
     Ok(())
 }
+
+/// 마술사님의 보정 로직이 포함된 펄스 계산기
+fn calculate_pulse(y_angle: u32) -> u32 {
+    // 1단계: 오프셋 보정 (+10.0)
+    //let y_scaled = y_angle as f32 + 10.0;
+    
+    // 2단계: 펄스 변환 (기존 계산식 유지)
+    // 펄스 범위 252 ~ 597 사이의 매핑
+    //let pulse = 252.0 + (y_scaled - 31.0) * 2.5;
+    
+    // 3단계: 안전 보호 로직 적용 (Clamp & Limit)
+    // 물리적 한계를 벗어나지 않도록 방어하고, 작업 최소치를 넘는지 체크
+    //let final_pulse = pulse.clamp(PHYSICAL_MIN, PHYSICAL_MAX);
+    let y_scaled = (y_angle as f32 + 10.0).clamp(0.0, 180.0);
+    
+    // 1455가 나오던 식을 다시 500~600대 안전 구역으로 매핑
+    // 예: Y=129일 때 펄스가 너무 높다면 나눗셈으로 범위를 줄입니다.
+    let pulse = 250.0 + (y_scaled * 1.5); 
+    
+    // 최종 보호막: 600을 절대 넘기지 않게 합니다.
+    let final_pulse = pulse.clamp(250.0, 600.0) as f32;
+    
+    if final_pulse < SAFE_WORK_MIN {
+        // 안전 가드 로그
+        // 나중에 여기다가 '속도 제한'이나 '정지' 로직을 넣으면 됩니다.
+        println!("⚠️ [Safety] 안전 하한선(317) 아래로 진입! 조심하세요, baby!");
+    }
+    
+    final_pulse as u32
+}
+
 
 // PCA9685 전용 부드러운 이동 로직 (예시)
 fn move_pca_smooth(
