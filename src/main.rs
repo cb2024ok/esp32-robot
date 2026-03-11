@@ -54,6 +54,11 @@ const PHYSICAL_MIN: f32 = 175.0; // 물리적 절대 하한선
 const PHYSICAL_MAX: f32 = 597.0; // 물리적 절대 상한선
 const SAFE_WORK_MIN: f32 = 317.0; // 우리가 정한 작업 하한선 (Y=57 기준)
 
+// [cite: 2026-02-13] 안정성을 위한 상수 설정
+const STEPS: usize = 60; // 궤적 분할 수 (안정적인 이동을 위해 설정)
+const SERVO_MIN: u16 = 150; // RDS3225 최소 펄스
+const SERVO_MAX: u16 = 600; // RDS3225 최대 펄스
+
 pub struct RobotArmController {
     pub master_id: usize,        // 현재 선택된 모터 번호 (0~5)
     pub angles: [f32; 6],        // 각 모터의 현재 각도 저장
@@ -317,8 +322,8 @@ fn main() -> Result<()> {
                     // 255를 초과하는 400도 제어를 위해 스케일링 적용
                     //let y_scaled = (y_angle as f32 / 255.0) * 400.0;
                     //let y_scaled = y_angle as f32 + 10.0f32;
-                    let y_scaled = calculate_pulse(y_angle.into()) as f32; //y_angle as f32 + 10.0f32;
-                    angle_to_pulse(y_scaled)
+                    calculate_pulse(y_angle.into()) as u16 //y_angle as f32 + 10.0f32;
+                    //angle_to_pulse(y_scaled)
                 };
                 
                 //let pulse = angle_to_pulse(x_angle as f32);
@@ -757,32 +762,40 @@ fn move_to_target(driver: &mut LedcDriver, current: &mut u32, target: u32) -> an
 }
 
 /// 마술사님의 보정 로직이 포함된 펄스 계산기
+/// calculate_pulse (2026.03.11) 적용
+/// 
 fn calculate_pulse(y_angle: u32) -> u32 {
     // 1단계: 오프셋 보정 (+10.0)
     //let y_scaled = y_angle as f32 + 10.0;
-    
+
     // 2단계: 펄스 변환 (기존 계산식 유지)
     // 펄스 범위 252 ~ 597 사이의 매핑
     //let pulse = 252.0 + (y_scaled - 31.0) * 2.5;
-    
+
     // 3단계: 안전 보호 로직 적용 (Clamp & Limit)
     // 물리적 한계를 벗어나지 않도록 방어하고, 작업 최소치를 넘는지 체크
     //let final_pulse = pulse.clamp(PHYSICAL_MIN, PHYSICAL_MAX);
     let y_scaled = (y_angle as f32 + 10.0).clamp(0.0, 180.0);
-    
+
     // 1455가 나오던 식을 다시 500~600대 안전 구역으로 매핑
     // 예: Y=129일 때 펄스가 너무 높다면 나눗셈으로 범위를 줄입니다.
-    let pulse = 250.0 + (y_scaled * 1.5); 
-    
+    let pulse = 250.0 + (y_scaled * 1.5);
+
     // 최종 보호막: 600을 절대 넘기지 않게 합니다.
-    let final_pulse = pulse.clamp(250.0, 600.0) as f32;
-    
+    //let final_pulse = pulse.clamp(250.0, 600.0) as f32;
+    // 이렇게 하면 모터가 반응 없는 허공에 총을 쏠 일이 없습니다!
+    let final_pulse = pulse.clamp(317.0, 500.0) as f32;
+
+    /* 비교 로직 개선 */
     if final_pulse < SAFE_WORK_MIN {
-        // 안전 가드 로그
-        // 나중에 여기다가 '속도 제한'이나 '정지' 로직을 넣으면 됩니다.
-        println!("⚠️ [Safety] 안전 하한선(317) 아래로 진입! 조심하세요, baby!");
+        println!("⚠️ [Low Warning] 가동 범위 미달: {}", final_pulse);
+    } else if final_pulse > 500.0 {
+        println!(
+            "⚠️ [High Warning] 작업 영역 초과(500 이상): {}",
+            final_pulse
+        );
     }
-    
+
     final_pulse as u32
 }
 
