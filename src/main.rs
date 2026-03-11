@@ -40,10 +40,6 @@ const SENSITIVITY: f32 = 2.0; // 한 번의 루프에서 변할 최대 각도
 const MIN_ANGLE: f32 = 0.0;
 const MAX_ANGLE: f32 = 180.0;
 
-// [cite: 2026-02-13] 안정성을 위한 상수 설정
-const STEPS: usize = 60; // 궤적 분할 수 (안정적인 이동을 위해 설정)
-const SERVO_MIN: u16 = 150; // RDS3225 최소 펄스
-const SERVO_MAX: u16 = 600; // RDS3225 최대 펄스
 
 const GRIPPER_OPEN: u32 = 480;  // 시원하게 열기
 const GRIPPER_CLOSE: u32 = 185; // 안정적으로 닫기
@@ -52,7 +48,7 @@ const GRIPPER_IDLE: u32 = 300;  // 기본 자세
 // 1. 설계 상수 정의 (마술사님의 관찰 데이터 기반)
 const PHYSICAL_MIN: f32 = 175.0; // 물리적 절대 하한선
 const PHYSICAL_MAX: f32 = 597.0; // 물리적 절대 상한선
-const SAFE_WORK_MIN: f32 = 317.0; // 우리가 정한 작업 하한선 (Y=57 기준)
+const SAFE_WORK_MIN: f32 = 180.0; // 우리가 정한 작업 하한선 (Y=57 기준)
 
 // [cite: 2026-02-13] 안정성을 위한 상수 설정
 const STEPS: usize = 60; // 궤적 분할 수 (안정적인 이동을 위해 설정)
@@ -777,19 +773,24 @@ fn calculate_pulse(y_angle: u32) -> u32 {
     //let final_pulse = pulse.clamp(PHYSICAL_MIN, PHYSICAL_MAX);
     let y_scaled = (y_angle as f32 + 10.0).clamp(0.0, 180.0);
 
+    println!("1 => y_scaled: {}",y_scaled);
+
     // 1455가 나오던 식을 다시 500~600대 안전 구역으로 매핑
     // 예: Y=129일 때 펄스가 너무 높다면 나눗셈으로 범위를 줄입니다.
-    let pulse = 250.0 + (y_scaled * 1.5);
+    let pulse = 120.0 + (y_scaled * 1.5);
+    //let pulse = 200.0 + (y_scaled * 3.0);
+    println!("2 => pulse: {}",pulse);
 
     // 최종 보호막: 600을 절대 넘기지 않게 합니다.
     //let final_pulse = pulse.clamp(250.0, 600.0) as f32;
     // 이렇게 하면 모터가 반응 없는 허공에 총을 쏠 일이 없습니다!
-    let final_pulse = pulse.clamp(317.0, 500.0) as f32;
+    let final_pulse = pulse.clamp(180.0, 350.0) as f32;
+    println!("3. => final_pulse: {}",final_pulse);
 
     /* 비교 로직 개선 */
     if final_pulse < SAFE_WORK_MIN {
         println!("⚠️ [Low Warning] 가동 범위 미달: {}", final_pulse);
-    } else if final_pulse > 500.0 {
+    } else if final_pulse > 400.0 {
         println!(
             "⚠️ [High Warning] 작업 영역 초과(500 이상): {}",
             final_pulse

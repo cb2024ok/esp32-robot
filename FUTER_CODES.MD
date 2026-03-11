@@ -23,3 +23,12 @@ loop {
     run_c5_power_test(&mut pwm, &mut current_angle, target);
     FreeRtos::delay_ms(10);
 }
+
+
+== 최하한선 (최적)
+1 => y_scaled: 111
+2 => pulse: 346.5
+3. => final_pulse: 346.5
+calc pulse value: 346
+
+
