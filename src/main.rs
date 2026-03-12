@@ -332,6 +332,8 @@ fn main() -> Result<()> {
                     0 => Some(Channel::C0),
                     1 => Some(Channel::C1),
                     2 => Some(Channel::C2),
+                    3 => Some(Channel::C3),
+                    4 => Some(Channel::C4),
                     _ => {
                         println!("⚠️ 경고: 정의되지 않은 모터 ID: {}", motor_id);
                         None
