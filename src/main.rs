@@ -304,8 +304,9 @@ fn main() -> Result<()> {
             let x_angle = packet[2];
             let y_angle = packet[3];
             let checksum = packet[4];
+
             
-            println!("🚀 [TA System] Received: ID={}, X={}, Y={}, CS={}", 
+             println!("🚀 [TA System] Received: ID={}, X={}, Y={}, CS={}", 
                     motor_id, x_angle, y_angle, checksum);
             
             // 여기에 서보 PWM 제어 로직 연결
@@ -324,6 +325,21 @@ fn main() -> Result<()> {
                 
                 //let pulse = angle_to_pulse(x_angle as f32);
                 //let channels = [Channel::C0, Channel::C1, Channel::C2];
+
+                // HOME 명령 수행
+                if motor_id == 0xFF {
+                    let home_angles: [f32; 3] = [90.0, 133.0, 152.0];
+                    let channels = [Channel::C1, Channel::C2, Channel::C0];
+
+                       let mut pwm_inner = pwm_clone.lock() ;
+                       for (i,&ch) in channels.iter().enumerate() {
+                        // 2. 각도를 펄스로 변환 (핵심!)
+                            let target_pulse = angle_to_pulse(home_angles[i]);
+                            move_smoothly(&mut *pwm_inner, channels[i], &mut current_positions[i as usize], target_pulse as u16);
+                            current_positions[i] = target_pulse as u16;
+                            FreeRtos::delay_ms(50);
+                       } 
+                } else {
 
                 println!("calc pulse value: {}",pulse); 
                 //let mut pwm = pwm_clone.lock();
@@ -345,18 +361,21 @@ fn main() -> Result<()> {
                 if let Some(channel) = target_channel {
                     let mut pwm = pwm_clone.lock();
                     //pwm.set_channel_on_off(channel, 0, pulse).unwrap();
-                    if let Err(e) = pwm.set_channel_on_off(channel, 0, pulse) {
-                        println!("🚨 I2C Write Failed: {:?}", e); // 여기서 에러가 찍히면 전원/연결 문제!
-                    }
 
+                    if let Err(e) = pwm.set_channel_on_off(channel, 0, pulse) {
+                           println!("🚨 I2C Write Failed: {:?}", e); // 여기서 에러가 찍히면 전원/연결 문제!
+                    }
                     
                     // 안정성 확보를 위한 지연 (기존 철학 유지)
                     FreeRtos::delay_ms(10); 
                 }
-                
+              }
                 //pwm.set_channel_on_off(Channel::C0, 0, pulse).unwrap();
                 //FreeRtos::delay_ms(10); // 안정성을 위해 조금씩 이동 [cite: 2026-02-13]
             }
+
+
+            
     });
 
     // 광고시작
@@ -1293,23 +1312,30 @@ fn run_c5_solo_performance(
 */
 
 // 간단한 서보 이동 부드럽게 만들기 예시 (의사 코드)
-/*fn move_smoothly(current_angle: u32, target_angle: u32) {
-    let step = 1; // 1도씩 이동
-    let delay_ms = 15; // 이동 간격
+fn move_smoothly(
+    pwm: &mut  Pca9685<I2cDriver<'_>>,
+    channel: Channel,
+    current_pos: &mut u16,
+    target_pos: u16,
+) {
+    let steps = 100; // 단계를 더 세분화하여 7.4V의 반동을 억제
+    let start = *current_pos as f32;
+    let diff = target_pos as f32 - start;
 
-    if current_angle < target_angle {
-        for angle in current_angle..=target_angle {
-            set_servo_pwm(angle);
-            sleep_ms(delay_ms);
-        }
-    } else {
-        for angle in (target_angle..=current_angle).rev() {
-            set_servo_pwm(angle);
-            sleep_ms(delay_ms);
-        }
+    for i in 1..=steps {
+        let t = i as f32 / steps as f32;
+        // 더 깊은 Sine 곡선으로 시작과 끝을 아주 부드럽게 처리
+        let ease = (1.0 - (t * std::f32::consts::PI).cos()) / 2.0;
+        let next_pos = (start + diff * ease) as u16;
+
+        pwm.set_channel_on_off(channel, 0, next_pos).unwrap();
+        
+        // 고전압 모터의 빠른 반응성에 맞춰 딜레이를 최적화 (10~15ms)
+        FreeRtos::delay_ms(12); 
     }
+    *current_pos = target_pos;
 }
-*/
+
 
 fn run_c5_power_test(pwm: &mut Pca9685<RefCellDevice<'_, I2cDriver<'_>>>, current_angle: &mut u32, target_angle: u32) {
     let step_delay = Duration::from_millis(20); // 안정성을 위해 20ms 간격
