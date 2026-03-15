@@ -334,6 +334,7 @@ fn main() -> Result<()> {
                     2 => Some(Channel::C2),
                     3 => Some(Channel::C3),
                     4 => Some(Channel::C4),
+                    5 => Some(Channel::C5),
                     _ => {
                         println!("⚠️ 경고: 정의되지 않은 모터 ID: {}", motor_id);
                         None
@@ -343,7 +344,11 @@ fn main() -> Result<()> {
                 // 3. 해당 채널이 있을 때만 구동
                 if let Some(channel) = target_channel {
                     let mut pwm = pwm_clone.lock();
-                    pwm.set_channel_on_off(channel, 0, pulse).unwrap();
+                    //pwm.set_channel_on_off(channel, 0, pulse).unwrap();
+                    if let Err(e) = pwm.set_channel_on_off(channel, 0, pulse) {
+                        println!("🚨 I2C Write Failed: {:?}", e); // 여기서 에러가 찍히면 전원/연결 문제!
+                    }
+
                     
                     // 안정성 확보를 위한 지연 (기존 철학 유지)
                     FreeRtos::delay_ms(10); 
