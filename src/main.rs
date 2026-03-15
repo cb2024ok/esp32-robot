@@ -322,9 +322,6 @@ fn main() -> Result<()> {
                     calculate_pulse(y_angle.into()) as u16 //y_angle as f32 + 10.0f32;
                     //angle_to_pulse(y_scaled)
                 };
-                
-                //let pulse = angle_to_pulse(x_angle as f32);
-                //let channels = [Channel::C0, Channel::C1, Channel::C2];
 
                 // HOME 명령 수행
                 if motor_id == 0xFF {
