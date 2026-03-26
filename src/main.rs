@@ -801,7 +801,8 @@ fn calculate_pulse(y_angle: u32) -> u32 {
     // 1455가 나오던 식을 다시 500~600대 안전 구역으로 매핑
     // 예: Y=129일 때 펄스가 너무 높다면 나눗셈으로 범위를 줄입니다.
     //let pulse = 120.0 + (y_scaled * 1.5);
-    let pulse: f32 = 120.0 + (y_scaled * 3.0);
+    //let pulse: f32 = 120.0 + (y_scaled * 3.0);
+    let pulse: f32 = 100.0 + (y_scaled * 4.5);
     //let pulse = 200.0 + (y_scaled * 3.0);
     println!("2 => pulse: {}",pulse);
 
@@ -809,7 +810,8 @@ fn calculate_pulse(y_angle: u32) -> u32 {
     //let final_pulse = pulse.clamp(250.0, 600.0) as f32;
     // 이렇게 하면 모터가 반응 없는 허공에 총을 쏠 일이 없습니다!
     //let final_pulse = pulse.clamp(180.0, 350.0) as f32;
-    let final_pulse = pulse.clamp(200.0, 650.0) as f32;
+    //let final_pulse = pulse.clamp(200.0, 650.0) as f32;
+    let final_pulse = pulse.clamp(150.0, 800.0) as f32;
     println!("3. => final_pulse: {}",final_pulse);
 
     /* 비교 로직 개선 */
