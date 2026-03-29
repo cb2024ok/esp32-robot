@@ -791,18 +791,22 @@ fn calculate_pulse(y_angle: u32) -> u32 {
     // 펄스 범위 252 ~ 597 사이의 매핑
     //let pulse = 252.0 + (y_scaled - 31.0) * 2.5;
 
+    let y_scaled = (y_angle as f32).clamp(0.0, 89.0);
+    println!("1 => y_clamped: {}", y_scaled);
+
     // 3단계: 안전 보호 로직 적용 (Clamp & Limit)
     // 물리적 한계를 벗어나지 않도록 방어하고, 작업 최소치를 넘는지 체크
     //let final_pulse = pulse.clamp(PHYSICAL_MIN, PHYSICAL_MAX);
-    let y_scaled = (y_angle as f32 + 10.0).clamp(0.0, 180.0);
+    //let y_scaled = (y_angle as f32 + 10.0).clamp(0.0, 180.0);
 
-    println!("1 => y_scaled: {}",y_scaled);
+    //println!("1 => y_scaled: {}",y_scaled);
 
     // 1455가 나오던 식을 다시 500~600대 안전 구역으로 매핑
     // 예: Y=129일 때 펄스가 너무 높다면 나눗셈으로 범위를 줄입니다.
     //let pulse = 120.0 + (y_scaled * 1.5);
     //let pulse: f32 = 120.0 + (y_scaled * 3.0);
-    let pulse: f32 = 100.0 + (y_scaled * 4.5);
+    //let pulse: f32 = 100.0 + (y_scaled * 4.5);
+    let pulse = 150.0 + (y_scaled * 5.0);   // ← 이 계수(5.0)를 테스트하면서 조정
     //let pulse = 200.0 + (y_scaled * 3.0);
     println!("2 => pulse: {}",pulse);
 
@@ -811,14 +815,14 @@ fn calculate_pulse(y_angle: u32) -> u32 {
     // 이렇게 하면 모터가 반응 없는 허공에 총을 쏠 일이 없습니다!
     //let final_pulse = pulse.clamp(180.0, 350.0) as f32;
     //let final_pulse = pulse.clamp(200.0, 650.0) as f32;
-    let final_pulse = pulse.clamp(150.0, 800.0) as f32;
+    let final_pulse = pulse.clamp(150.0, 650.0) as f32;
     println!("3. => final_pulse: {}",final_pulse);
 
     /* 비교 로직 개선 */
-    if final_pulse < SAFE_WORK_MIN {
+    if final_pulse < 180.0 {
         println!("⚠️ [Low Warning] 가동 범위 미달: {}", final_pulse);
     //} else if final_pulse > 400.0 {
-    } else if final_pulse > 700.0 {
+    } else if final_pulse > 620.0 {
         println!(
             "⚠️ [High Warning] 작업 영역 초과(500 이상): {}",
             final_pulse
